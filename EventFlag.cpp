@@ -16,12 +16,17 @@
 
 #define LOG_TAG "FMQ_EventFlags"
 
-#include <fmq/EventFlag.h>
 #include <linux/futex.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
-#include <utils/Log.h>
+#include <unistd.h>
+
 #include <new>
+
+#include <fmq/EventFlag.h>
+#include <utils/Log.h>
+#include <utils/SystemClock.h>
 
 namespace android {
 namespace hardware {
@@ -112,8 +117,8 @@ status_t EventFlag::wake(uint32_t bitmask) {
     status_t status = NO_ERROR;
     uint32_t old = std::atomic_fetch_or(mEfWordPtr, bitmask);
     /*
-     * No need to call FUTEX_WAKE_BITSET if there is a deferred wake
-     * already available for any bit in the bitmask.
+     * No need to call FUTEX_WAKE_BITSET if there were deferred wakes
+     * already available for all set bits from bitmask.
      */
     if ((~old & bitmask) != 0) {
         int ret = syscall(__NR_futex, mEfWordPtr, FUTEX_WAKE_BITSET,
@@ -130,7 +135,7 @@ status_t EventFlag::wake(uint32_t bitmask) {
  * Wait for any of the bits in the bitmask to be set
  * and return which bits caused the return.
  */
-status_t EventFlag::wait(uint32_t bitmask, uint32_t* efState, int64_t timeoutNanoSeconds) {
+status_t EventFlag::waitHelper(uint32_t bitmask, uint32_t* efState, int64_t timeoutNanoSeconds) {
     /*
      * Return early if there are no set bits in bitmask.
      */
@@ -176,6 +181,51 @@ status_t EventFlag::wait(uint32_t bitmask, uint32_t* efState, int64_t timeoutNan
     } else {
         old = std::atomic_fetch_and(mEfWordPtr, ~bitmask);
         *efState = old & bitmask;
+
+        if (*efState == 0) {
+            /* Return -EINTR for a spurious wakeup */
+            status = -EINTR;
+        }
+    }
+    return status;
+}
+
+/*
+ * Wait for any of the bits in the bitmask to be set
+ * and return which bits caused the return. If 'retry'
+ * is true, wait again on a spurious wake-up.
+ */
+status_t EventFlag::wait(uint32_t bitmask,
+                         uint32_t* efState,
+                         int64_t timeoutNanoSeconds,
+                         bool retry) {
+    if (!retry) {
+        return waitHelper(bitmask, efState, timeoutNanoSeconds);
+    }
+
+    bool shouldTimeOut = timeoutNanoSeconds != 0;
+    int64_t prevTimeNs = shouldTimeOut ? android::elapsedRealtimeNano() : 0;
+    status_t status;
+    while (true) {
+        if (shouldTimeOut) {
+            int64_t currentTimeNs = android::elapsedRealtimeNano();
+            /*
+             * Decrement TimeOutNanos to account for the time taken to complete the last
+             * iteration of the while loop.
+             */
+            timeoutNanoSeconds -= currentTimeNs - prevTimeNs;
+            prevTimeNs = currentTimeNs;
+            if (timeoutNanoSeconds <= 0) {
+                status = -ETIMEDOUT;
+                *efState = 0;
+                break;
+            }
+        }
+
+        status = waitHelper(bitmask, efState, timeoutNanoSeconds);
+        if ((status != -EAGAIN) && (status != -EINTR)) {
+            break;
+        }
     }
     return status;
 }

@@ -17,26 +17,11 @@
 LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := mq_benchmark_service
-LOCAL_SRC_FILES := \
-    msgq_benchmark_service.cpp
-
-LOCAL_SHARED_LIBRARIES := \
-    libhwbinder \
-    libbase \
-    liblog \
-    libcutils \
-    libutils \
-    libhidlbase \
-    libhidltransport
-
-LOCAL_SHARED_LIBRARIES += android.hardware.benchmarks.msgq@1.0 libfmq
-include $(BUILD_EXECUTABLE)
-
-include $(CLEAR_VARS)
 LOCAL_SRC_FILES := \
     msgq_benchmark_client.cpp
 
+LOCAL_CFLAGS := -Wall -Werror
+
 LOCAL_SHARED_LIBRARIES := \
     libhwbinder \
     libbase \
@@ -45,7 +30,11 @@ LOCAL_SHARED_LIBRARIES := \
     libhidlbase \
     libhidltransport
 
-LOCAL_SHARED_LIBRARIES += android.hardware.benchmarks.msgq@1.0 libfmq
+LOCAL_REQUIRED_MODULES := \
+    android.hardware.tests.msgq@1.0-impl_32 \
+    android.hardware.tests.msgq@1.0-impl
+
+LOCAL_SHARED_LIBRARIES += android.hardware.tests.msgq@1.0 libfmq
 LOCAL_MODULE := mq_benchmark_client
 include $(BUILD_NATIVE_TEST)
 

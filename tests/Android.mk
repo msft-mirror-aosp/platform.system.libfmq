@@ -16,51 +16,20 @@
 
 LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
-LOCAL_MODULE := mq_test_service
-LOCAL_SRC_FILES := \
-    msgq_test_service.cpp
+LOCAL_MODULE := fmq_test
+LOCAL_MODULE_CLASS := NATIVE_TESTS
+LOCAL_SRC_FILES := fmq_test
+LOCAL_REQUIRED_MODULES :=                           \
+    mq_test_client                                  \
+    android.hardware.tests.msgq@1.0-service-test    \
+    mq_test_client_32                               \
+    android.hardware.tests.msgq@1.0-service-test_32 \
+    hidl_test_helper
 
-LOCAL_SHARED_LIBRARIES := \
-    libhidlbase \
-    libhidltransport \
-    libhwbinder \
-    libbase \
-    liblog \
-    libcutils \
-    libutils \
-    libfmq
-
-LOCAL_SHARED_LIBRARIES += android.hardware.tests.msgq@1.0
-include $(BUILD_EXECUTABLE)
+include $(BUILD_PREBUILT)
 
 include $(CLEAR_VARS)
-LOCAL_SRC_FILES := \
-    msgq_test_client.cpp
 
-LOCAL_SHARED_LIBRARIES := \
-    libhidlbase \
-    libhidltransport  \
-    libhwbinder \
-    libcutils \
-    libutils \
-    libbase \
-    libfmq \
-    liblog
-
-LOCAL_SHARED_LIBRARIES += android.hardware.tests.msgq@1.0 libfmq
-LOCAL_MODULE := mq_test_client
-include $(BUILD_NATIVE_TEST)
-
-include $(CLEAR_VARS)
-LOCAL_SRC_FILES := \
-    mq_test.cpp
-LOCAL_STATIC_LIBRARIES := libutils libcutils liblog
-LOCAL_SHARED_LIBRARIES := \
-    libhidlbase \
-    libhidltransport \
-    libhwbinder \
-    libbase \
-    libfmq
-LOCAL_MODULE := mq_test
-include $(BUILD_NATIVE_TEST)
-
+LOCAL_MODULE := VtsFmqUnitTests
+VTS_CONFIG_SRC_DIR := system/libfmq/tests
+-include test/vts/tools/build/Android.host_config.mk

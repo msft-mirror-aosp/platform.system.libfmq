@@ -21,8 +21,9 @@
 #include <chrono>
 #include <iostream>
 
-#include <android/hardware/benchmarks/msgq/1.0/IBenchmarkMsgQ.h>
+#include <android/hardware/tests/msgq/1.0/IBenchmarkMsgQ.h>
 #include <fmq/MessageQueue.h>
+#include <hidl/ServiceManagement.h>
 
 // libutils:
 using android::OK;
@@ -30,7 +31,7 @@ using android::sp;
 using android::status_t;
 
 // generated
-using android::hardware::benchmarks::msgq::V1_0::IBenchmarkMsgQ;
+using android::hardware::tests::msgq::V1_0::IBenchmarkMsgQ;
 using std::cerr;
 using std::cout;
 using std::endl;
@@ -39,6 +40,7 @@ using std::endl;
 using android::hardware::kSynchronizedReadWrite;
 using android::hardware::MQDescriptorSync;
 using android::hardware::MessageQueue;
+using android::hardware::details::waitForHwService;
 
 /*
  * All the benchmark cases will be performed on an FMQ of size kQueueSize.
@@ -61,8 +63,6 @@ enum PacketSizes {
     kPacketSize1024 = 1024
 };
 
-const char kServiceName[] = "android.hardware.benchmarks.msgq@1.0::IBenchmarkMsgQ";
-
 class MQTestClient : public ::testing::Test {
 protected:
     virtual void TearDown() {
@@ -71,8 +71,12 @@ protected:
     }
 
     virtual void SetUp() {
-        service = IBenchmarkMsgQ::getService(kServiceName);
+        // waitForHwService is required because IBenchmarkMsgQ is not in manifest.xml.
+        // "Real" HALs shouldn't be doing this.
+        waitForHwService(IBenchmarkMsgQ::descriptor, "default");
+        service = IBenchmarkMsgQ::getService();
         ASSERT_NE(service, nullptr);
+        ASSERT_TRUE(service->isRemote());
         /*
          * Request service to configure the client inbox queue.
          */
