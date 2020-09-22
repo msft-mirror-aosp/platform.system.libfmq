@@ -30,6 +30,8 @@ using ::aidl::android::fmq::test::EventFlagBits;
 using ::aidl::android::fmq::test::ITestAidlMsgQ;
 
 using ::aidl::android::hardware::common::MQDescriptor;
+using ::aidl::android::hardware::common::SynchronizedReadWrite;
+using ::aidl::android::hardware::common::UnsynchronizedWrite;
 using ::android::hardware::kSynchronizedReadWrite;
 using ::android::hardware::kUnsynchronizedWrite;
 using ::android::hardware::MQFlavor;
@@ -37,15 +39,17 @@ using ::android::hardware::MQFlavor;
 using ::android::AidlMessageQueue;
 
 struct TestAidlMsgQ : public BnTestAidlMsgQ {
-    typedef AidlMessageQueue<uint16_t, kSynchronizedReadWrite> MessageQueueSync;
-    typedef AidlMessageQueue<uint16_t, kUnsynchronizedWrite> MessageQueueUnsync;
+    typedef AidlMessageQueue<int32_t, SynchronizedReadWrite> MessageQueueSync;
+    typedef AidlMessageQueue<int32_t, UnsynchronizedWrite> MessageQueueUnsync;
 
     TestAidlMsgQ() : mFmqSynchronized(nullptr), mFmqUnsynchronized(nullptr) {}
 
     // Methods from ::aidl::android::fmq::test::ITestAidlMsgQ follow.
-    ndk::ScopedAStatus configureFmqSyncReadWrite(const MQDescriptor& mqDesc,
-                                                 bool* _aidl_return) override;
-    ndk::ScopedAStatus getFmqUnsyncWrite(bool configureFmq, MQDescriptor* mqDesc,
+    ndk::ScopedAStatus configureFmqSyncReadWrite(
+            const MQDescriptor<int32_t, SynchronizedReadWrite>& mqDesc,
+            bool* _aidl_return) override;
+    ndk::ScopedAStatus getFmqUnsyncWrite(bool configureFmq,
+                                         MQDescriptor<int32_t, UnsynchronizedWrite>* mqDesc,
                                          bool* _aidl_return) override;
     ndk::ScopedAStatus requestBlockingRead(int32_t count) override;
     ndk::ScopedAStatus requestBlockingReadDefaultEventFlagBits(int32_t count) override;
@@ -62,7 +66,7 @@ struct TestAidlMsgQ : public BnTestAidlMsgQ {
     /*
      * Utility function to verify data read from the fast message queue.
      */
-    bool verifyData(uint16_t* data, int count) {
+    bool verifyData(int32_t* data, int count) {
         for (int i = 0; i < count; i++) {
             if (data[i] != i) return false;
         }
