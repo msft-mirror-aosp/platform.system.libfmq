@@ -16,6 +16,7 @@
 
 #include <asm-generic/mman.h>
 #include <fmq/AidlMessageQueue.h>
+#include <fmq/ConvertMQDescriptors.h>
 #include <fmq/EventFlag.h>
 #include <fmq/MessageQueue.h>
 #include <gtest/gtest.h>
@@ -24,8 +25,8 @@
 #include <sstream>
 #include <thread>
 
-using aidl::android::hardware::common::SynchronizedReadWrite;
-using aidl::android::hardware::common::UnsynchronizedWrite;
+using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
+using aidl::android::hardware::common::fmq::UnsynchronizedWrite;
 using android::hardware::kSynchronizedReadWrite;
 using android::hardware::kUnsynchronizedWrite;
 
@@ -40,6 +41,17 @@ typedef android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite> Message
 typedef android::hardware::MessageQueue<uint8_t, kUnsynchronizedWrite> MessageQueueUnsync;
 typedef android::AidlMessageQueue<uint16_t, SynchronizedReadWrite> AidlMessageQueueSync16;
 typedef android::hardware::MessageQueue<uint16_t, kSynchronizedReadWrite> MessageQueueSync16;
+
+typedef android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite> MessageQueueSync8;
+typedef android::hardware::MQDescriptor<uint8_t, kSynchronizedReadWrite> HidlMQDescSync8;
+typedef android::AidlMessageQueue<int8_t, SynchronizedReadWrite> AidlMessageQueueSync8;
+typedef aidl::android::hardware::common::fmq::MQDescriptor<int8_t, SynchronizedReadWrite>
+        AidlMQDescSync8;
+typedef android::hardware::MessageQueue<uint8_t, kUnsynchronizedWrite> MessageQueueUnsync8;
+typedef android::hardware::MQDescriptor<uint8_t, kUnsynchronizedWrite> HidlMQDescUnsync8;
+typedef android::AidlMessageQueue<int8_t, UnsynchronizedWrite> AidlMessageQueueUnsync8;
+typedef aidl::android::hardware::common::fmq::MQDescriptor<int8_t, UnsynchronizedWrite>
+        AidlMQDescUnsync8;
 
 // Run everything on both the AIDL and HIDL versions with sync and unsync flavors
 typedef ::testing::Types<AidlMessageQueueSync, MessageQueueSync> SyncTypes;
@@ -154,6 +166,7 @@ template <typename T>
 class BadQueueConfig : public TestBase<T> {};
 
 class AidlOnlyBadQueueConfig : public ::testing::Test {};
+class Hidl2AidlOperation : public ::testing::Test {};
 
 /*
  * Utility function to initialize data to be written to the FMQ
@@ -231,6 +244,130 @@ TYPED_TEST(BadQueueConfig, QueueSizeTooLarge) {
     ASSERT_FALSE(fmq->isValid());
 }
 
+TEST_F(Hidl2AidlOperation, ConvertDescriptorsSync) {
+    size_t numElementsInQueue = 64;
+
+    // Create HIDL side and get MQDescriptor
+    MessageQueueSync8* fmq = new (std::nothrow) MessageQueueSync8(numElementsInQueue);
+    ASSERT_NE(nullptr, fmq);
+    ASSERT_TRUE(fmq->isValid());
+    const HidlMQDescSync8* hidlDesc = fmq->getDesc();
+    ASSERT_NE(nullptr, hidlDesc);
+
+    // Create AIDL MQDescriptor to send to another process based off the HIDL MQDescriptor
+    AidlMQDescSync8 aidlDesc;
+    android::unsafeHidlToAidlMQDescriptor<uint8_t, int8_t, SynchronizedReadWrite>(*hidlDesc,
+                                                                                  &aidlDesc);
+
+    // Other process will create the other side of the queue using the AIDL MQDescriptor
+    AidlMessageQueueSync8* aidlFmq = new (std::nothrow) AidlMessageQueueSync8(aidlDesc);
+    ASSERT_NE(nullptr, aidlFmq);
+    ASSERT_TRUE(aidlFmq->isValid());
+
+    // Make sure a write to the HIDL side, will show up for the AIDL side
+    constexpr size_t dataLen = 4;
+    uint8_t data[dataLen] = {12, 11, 10, 9};
+    fmq->write(data, dataLen);
+
+    int8_t readData[dataLen];
+    ASSERT_TRUE(aidlFmq->read(readData, dataLen));
+
+    ASSERT_EQ(data[0], readData[0]);
+    ASSERT_EQ(data[1], readData[1]);
+    ASSERT_EQ(data[2], readData[2]);
+    ASSERT_EQ(data[3], readData[3]);
+}
+
+TEST_F(Hidl2AidlOperation, ConvertDescriptorsUnsync) {
+    size_t numElementsInQueue = 64;
+
+    // Create HIDL side and get MQDescriptor
+    MessageQueueUnsync8* fmq = new (std::nothrow) MessageQueueUnsync8(numElementsInQueue);
+    ASSERT_NE(nullptr, fmq);
+    ASSERT_TRUE(fmq->isValid());
+    const HidlMQDescUnsync8* hidlDesc = fmq->getDesc();
+    ASSERT_NE(nullptr, hidlDesc);
+
+    // Create AIDL MQDescriptor to send to another process based off the HIDL MQDescriptor
+    AidlMQDescUnsync8 aidlDesc;
+    android::unsafeHidlToAidlMQDescriptor<uint8_t, int8_t, UnsynchronizedWrite>(*hidlDesc,
+                                                                                &aidlDesc);
+
+    // Other process will create the other side of the queue using the AIDL MQDescriptor
+    AidlMessageQueueUnsync8* aidlFmq = new (std::nothrow) AidlMessageQueueUnsync8(aidlDesc);
+    ASSERT_NE(nullptr, aidlFmq);
+    ASSERT_TRUE(aidlFmq->isValid());
+
+    // Can have multiple readers with unsync flavor
+    AidlMessageQueueUnsync8* aidlFmq2 = new (std::nothrow) AidlMessageQueueUnsync8(aidlDesc);
+    ASSERT_NE(nullptr, aidlFmq2);
+    ASSERT_TRUE(aidlFmq2->isValid());
+
+    // Make sure a write to the HIDL side, will show up for the AIDL side
+    constexpr size_t dataLen = 4;
+    uint8_t data[dataLen] = {12, 11, 10, 9};
+    fmq->write(data, dataLen);
+
+    int8_t readData[dataLen];
+    ASSERT_TRUE(aidlFmq->read(readData, dataLen));
+    int8_t readData2[dataLen];
+    ASSERT_TRUE(aidlFmq2->read(readData2, dataLen));
+
+    ASSERT_EQ(data[0], readData[0]);
+    ASSERT_EQ(data[1], readData[1]);
+    ASSERT_EQ(data[2], readData[2]);
+    ASSERT_EQ(data[3], readData[3]);
+    ASSERT_EQ(data[0], readData2[0]);
+    ASSERT_EQ(data[1], readData2[1]);
+    ASSERT_EQ(data[2], readData2[2]);
+    ASSERT_EQ(data[3], readData2[3]);
+}
+
+TEST_F(Hidl2AidlOperation, ConvertFdIndex1) {
+    native_handle_t* mqHandle = native_handle_create(2 /* numFds */, 0 /* numInts */);
+    if (mqHandle == nullptr) {
+        return;
+    }
+    mqHandle->data[0] = 12;
+    mqHandle->data[1] = 5;
+    ::android::hardware::hidl_vec<android::hardware::GrantorDescriptor> grantors;
+    grantors.resize(3);
+    grantors[0] = {0, 1 /* fdIndex */, 16, 16};
+    grantors[1] = {0, 1 /* fdIndex */, 16, 16};
+    grantors[2] = {0, 1 /* fdIndex */, 16, 16};
+
+    HidlMQDescUnsync8* hidlDesc = new (std::nothrow) HidlMQDescUnsync8(grantors, mqHandle, 10);
+    ASSERT_TRUE(hidlDesc->isHandleValid());
+
+    AidlMQDescUnsync8 aidlDesc;
+    bool ret = android::unsafeHidlToAidlMQDescriptor<uint8_t, int8_t, UnsynchronizedWrite>(
+            *hidlDesc, &aidlDesc);
+    ASSERT_TRUE(ret);
+}
+
+TEST_F(Hidl2AidlOperation, ConvertMultipleFdIndexFail) {
+    native_handle_t* mqHandle = native_handle_create(2 /* numFds */, 0 /* numInts */);
+    if (mqHandle == nullptr) {
+        return;
+    }
+    mqHandle->data[0] = 12;
+    mqHandle->data[1] = 5;
+    ::android::hardware::hidl_vec<android::hardware::GrantorDescriptor> grantors;
+    grantors.resize(3);
+    grantors[0] = {0, 1 /* fdIndex */, 16, 16};
+    grantors[1] = {0, 1 /* fdIndex */, 16, 16};
+    // Different fdIndex. Conversion should fail.
+    grantors[2] = {0, 0 /* fdIndex */, 16, 16};
+
+    HidlMQDescUnsync8* hidlDesc = new (std::nothrow) HidlMQDescUnsync8(grantors, mqHandle, 10);
+    ASSERT_TRUE(hidlDesc->isHandleValid());
+
+    AidlMQDescUnsync8 aidlDesc;
+    bool ret = android::unsafeHidlToAidlMQDescriptor<uint8_t, int8_t, UnsynchronizedWrite>(
+            *hidlDesc, &aidlDesc);
+    ASSERT_FALSE(ret);
+}
+
 // TODO(b/165674950) Since AIDL does not support unsigned integers, it can only support
 // 1/2 the queue size of HIDL. Once support is added to AIDL, this restriction can be
 // lifted. Until then, check against SSIZE_MAX instead of SIZE_MAX.
@@ -245,7 +382,7 @@ TEST_F(AidlOnlyBadQueueConfig, QueueSizeTooLargeForAidl) {
 }
 
 TEST_F(AidlOnlyBadQueueConfig, NegativeAidlDescriptor) {
-    aidl::android::hardware::common::MQDescriptor<uint16_t, SynchronizedReadWrite> desc;
+    aidl::android::hardware::common::fmq::MQDescriptor<uint16_t, SynchronizedReadWrite> desc;
     desc.quantum = -10;
     AidlMessageQueueSync16* fmq = new (std::nothrow) AidlMessageQueueSync16(desc);
     ASSERT_NE(nullptr, fmq);
@@ -256,11 +393,11 @@ TEST_F(AidlOnlyBadQueueConfig, NegativeAidlDescriptor) {
 }
 
 TEST_F(AidlOnlyBadQueueConfig, NegativeAidlDescriptorGrantor) {
-    aidl::android::hardware::common::MQDescriptor<uint16_t, SynchronizedReadWrite> desc;
+    aidl::android::hardware::common::fmq::MQDescriptor<uint16_t, SynchronizedReadWrite> desc;
     desc.quantum = 2;
     desc.flags = 0;
     desc.grantors.push_back(
-            aidl::android::hardware::common::GrantorDescriptor{.offset = 12, .extent = -10});
+            aidl::android::hardware::common::fmq::GrantorDescriptor{.offset = 12, .extent = -10});
     AidlMessageQueueSync16* fmq = new (std::nothrow) AidlMessageQueueSync16(desc);
     ASSERT_NE(nullptr, fmq);
     /*
@@ -268,6 +405,28 @@ TEST_F(AidlOnlyBadQueueConfig, NegativeAidlDescriptorGrantor) {
      */
     ASSERT_FALSE(fmq->isValid());
 }
+
+/*
+ * Test creating a new queue from a modified MQDescriptor of another queue.
+ * If MQDescriptor.quantum doesn't match the size of the payload(T), the queue
+ * should be invalid.
+ */
+TEST_F(AidlOnlyBadQueueConfig, MismatchedPayloadSize) {
+    AidlMessageQueueSync16 fmq = AidlMessageQueueSync16(64);
+    aidl::android::hardware::common::fmq::MQDescriptor<uint16_t, SynchronizedReadWrite> desc =
+            fmq.dupeDesc();
+    // This should work fine with the unmodified MQDescriptor
+    AidlMessageQueueSync16 fmq2 = AidlMessageQueueSync16(desc);
+    ASSERT_TRUE(fmq2.isValid());
+
+    // Simulate a difference in payload size between processes handling the queue
+    desc.quantum = 8;
+    AidlMessageQueueSync16 fmq3 = AidlMessageQueueSync16(desc);
+
+    // Should fail due to the quantum not matching the sizeof(uint16_t)
+    ASSERT_FALSE(fmq3.isValid());
+}
+
 /*
  * Test that basic blocking works. This test uses the non-blocking read()/write()
  * APIs.
