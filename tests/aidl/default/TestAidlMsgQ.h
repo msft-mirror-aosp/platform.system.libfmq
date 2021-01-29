@@ -29,9 +29,9 @@ namespace test {
 using ::aidl::android::fmq::test::EventFlagBits;
 using ::aidl::android::fmq::test::ITestAidlMsgQ;
 
-using ::aidl::android::hardware::common::MQDescriptor;
-using ::aidl::android::hardware::common::SynchronizedReadWrite;
-using ::aidl::android::hardware::common::UnsynchronizedWrite;
+using ::aidl::android::hardware::common::fmq::MQDescriptor;
+using ::aidl::android::hardware::common::fmq::SynchronizedReadWrite;
+using ::aidl::android::hardware::common::fmq::UnsynchronizedWrite;
 using ::android::hardware::kSynchronizedReadWrite;
 using ::android::hardware::kUnsynchronizedWrite;
 using ::android::hardware::MQFlavor;
@@ -48,7 +48,7 @@ struct TestAidlMsgQ : public BnTestAidlMsgQ {
     ndk::ScopedAStatus configureFmqSyncReadWrite(
             const MQDescriptor<int32_t, SynchronizedReadWrite>& mqDesc,
             bool* _aidl_return) override;
-    ndk::ScopedAStatus getFmqUnsyncWrite(bool configureFmq,
+    ndk::ScopedAStatus getFmqUnsyncWrite(bool configureFmq, bool userFd,
                                          MQDescriptor<int32_t, UnsynchronizedWrite>* mqDesc,
                                          bool* _aidl_return) override;
     ndk::ScopedAStatus requestBlockingRead(int32_t count) override;

@@ -8,6 +8,7 @@ aidl_interface {
     ],
     imports: [
         "android.hardware.common",
+        "android.hardware.common.fmq",
     ],
     gen_trace: true,
     backend: {
