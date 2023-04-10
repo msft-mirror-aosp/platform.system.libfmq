@@ -36,8 +36,8 @@ using android::hardware::kUnsynchronizedWrite;
 
 typedef int32_t payload_t;
 
-// The reader will wait for 10 ms
-static constexpr int kBlockingTimeoutNs = 10000000;
+// The reader/writers will wait during blocking calls
+static constexpr int kBlockingTimeoutNs = 100000;
 
 /*
  * MessageQueueBase.h contains asserts when memory allocation fails. So we need
@@ -123,7 +123,7 @@ void reader(const Desc& desc, std::vector<uint8_t> readerData, bool userFd) {
         return;
     }
     FuzzedDataProvider fdp(&readerData[0], readerData.size());
-    payload_t* ring = nullptr;
+    payload_t* ring = reinterpret_cast<payload_t*>(readMq.getRingBufferPtr());
     while (fdp.remaining_bytes()) {
         typename Queue::MemTransaction tx;
         size_t numElements = fdp.ConsumeIntegralInRange<size_t>(0, kMaxNumElements);
@@ -136,9 +136,6 @@ void reader(const Desc& desc, std::vector<uint8_t> readerData, bool userFd) {
         // the ring buffer is only next to the read/write counters when there is
         // no user supplied fd
         if (!userFd) {
-            if (ring == nullptr) {
-                ring = firstStart;
-            }
             if (fdp.ConsumeIntegral<uint8_t>() == 1) {
                 uint64_t* writeCounter =
                         getCounterPtr(ring, desc, android::hardware::details::WRITEPTRPOS);
@@ -184,7 +181,7 @@ void readerBlocking<MessageQueueUnsync, MQDescUnsync>(const MQDescUnsync&, std::
 
 template <typename Queue, typename Desc>
 void writer(const Desc& desc, Queue& writeMq, FuzzedDataProvider& fdp, bool userFd) {
-    payload_t* ring = nullptr;
+    payload_t* ring = reinterpret_cast<payload_t*>(writeMq.getRingBufferPtr());
     while (fdp.remaining_bytes()) {
         typename Queue::MemTransaction tx;
         size_t numElements = 1;
@@ -199,9 +196,6 @@ void writer(const Desc& desc, Queue& writeMq, FuzzedDataProvider& fdp, bool user
         // the ring buffer is only next to the read/write counters when there is
         // no user supplied fd
         if (!userFd) {
-            if (ring == nullptr) {
-                ring = firstStart;
-            }
             if (fdp.ConsumeIntegral<uint8_t>() == 1) {
                 uint64_t* readCounter =
                         getCounterPtr(ring, desc, android::hardware::details::READPTRPOS);
