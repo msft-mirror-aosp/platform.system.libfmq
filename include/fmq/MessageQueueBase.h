@@ -421,6 +421,11 @@ struct MessageQueueBase {
      */
     bool commitRead(size_t nMessages);
 
+    /**
+     * Get the pointer to the ring buffer. Useful for debugging and fuzzing.
+     */
+    uint8_t* getRingBufferPtr() const { return mRing; }
+
   private:
     size_t availableToWriteBytes() const;
     size_t availableToReadBytes() const;
@@ -1281,6 +1286,29 @@ void* MessageQueueBase<MQDescriptorType, T, flavor>::mapGrantorDescr(uint32_t gr
                                     ") offset needs to be aligned to word boundary but is: " +
                                     std::to_string(grantors[grantorIdx].offset));
         return nullptr;
+    }
+
+    /*
+     * Expect some grantors to be at least a min size
+     */
+    for (uint32_t i = 0; i < grantors.size(); i++) {
+        switch (i) {
+            case hardware::details::READPTRPOS:
+                if (grantors[i].extent < sizeof(uint64_t)) return nullptr;
+                break;
+            case hardware::details::WRITEPTRPOS:
+                if (grantors[i].extent < sizeof(uint64_t)) return nullptr;
+                break;
+            case hardware::details::DATAPTRPOS:
+                // We don't expect specific data size
+                break;
+            case hardware::details::EVFLAGWORDPOS:
+                if (grantors[i].extent < sizeof(uint32_t)) return nullptr;
+                break;
+            default:
+                // We don't care about unknown grantors
+                break;
+        }
     }
 
     int mapOffset = (grantors[grantorIdx].offset / PAGE_SIZE) * PAGE_SIZE;
