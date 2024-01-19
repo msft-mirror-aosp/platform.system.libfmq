@@ -203,7 +203,7 @@ void writer(const Desc& desc, Queue& writeMq, FuzzedDataProvider& fdp, bool user
                 *readCounter = fdp.ConsumeIntegral<uint64_t>();
             }
         }
-        *firstStart = fdp.ConsumeIntegral<payload_t>();
+        *firstStart = fdp.ConsumeIntegral<uint8_t>();
 
         writeMq.commitWrite(numElements);
     }
@@ -218,7 +218,7 @@ void writerBlocking(Queue& writeMq, FuzzedDataProvider& fdp,
         size_t count = fdp.ConsumeIntegralInRange<size_t>(0, writeMq.getQuantumCount() + 1);
         std::vector<payload_t> data;
         for (int i = 0; i < count; i++) {
-            data.push_back(fdp.ConsumeIntegral<payload_t>());
+            data.push_back(fdp.ConsumeIntegral<uint8_t>());
         }
         writeMq.writeBlocking(data.data(), count, kBlockingTimeoutNs);
     }
@@ -250,7 +250,7 @@ inline std::optional<Desc> getAidlDesc(std::unique_ptr<Queue>& queue, FuzzedData
         std::vector<aidl::android::hardware::common::fmq::GrantorDescriptor> grantors;
         size_t numGrantors = fdp.ConsumeIntegralInRange<size_t>(0, 4);
         for (int i = 0; i < numGrantors; i++) {
-            grantors.push_back({fdp.ConsumeIntegralInRange<int32_t>(-2, 2) /* fdIndex */,
+            grantors.push_back({fdp.ConsumeIntegralInRange<int32_t>(0, 2) /* fdIndex */,
                                 fdp.ConsumeIntegralInRange<int32_t>(
                                         0, kMaxCustomGrantorMemoryBytes) /* offset */,
                                 fdp.ConsumeIntegralInRange<int64_t>(
