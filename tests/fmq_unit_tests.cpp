@@ -376,7 +376,8 @@ TEST_F(HidlOnlyBadQueueConfig, ExtentTooLarge) {
 
 // If this test fails and we do leak FDs, the next test will cause a crash
 TEST_F(AidlOnlyBadQueueConfig, LookForLeakedFds) {
-    size_t numElementsInQueue = SIZE_MAX / sizeof(uint32_t) - PAGE_SIZE - 1;
+    const size_t kPageSize = getpagesize();
+    size_t numElementsInQueue = SIZE_MAX / sizeof(uint32_t) - kPageSize - 1;
     struct rlimit rlim;
     ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &rlim), 0);
     for (int i = 0; i <= rlim.rlim_cur + 1; i++) {
@@ -688,6 +689,78 @@ TYPED_TEST(BlockingReadWrites, BlockingTimeOutTest) {
      * Wait should time out in a second.
      */
     EXPECT_EQ(android::TIMED_OUT, ret);
+
+    status = android::hardware::EventFlag::deleteEventFlag(&efGroup);
+    ASSERT_EQ(android::NO_ERROR, status);
+}
+
+/*
+ * Test EventFlag wait on a waked flag with a short timeout.
+ */
+TYPED_TEST(BlockingReadWrites, ShortEventFlagWaitWithWakeTest) {
+    std::atomic<uint32_t> eventFlagWord;
+    std::atomic_init(&eventFlagWord, static_cast<uint32_t>(kFmqNotFull));
+    android::hardware::EventFlag* efGroup = nullptr;
+    android::status_t status =
+            android::hardware::EventFlag::createEventFlag(&eventFlagWord, &efGroup);
+    ASSERT_EQ(android::NO_ERROR, status);
+    ASSERT_NE(nullptr, efGroup);
+
+    status = efGroup->wake(kFmqNotEmpty);
+    ASSERT_EQ(android::NO_ERROR, status);
+
+    uint32_t efState = 0;
+    android::status_t ret = efGroup->wait(kFmqNotEmpty, &efState, 1 /* ns */, true /* retry */);
+    ASSERT_EQ(android::NO_ERROR, ret);
+
+    status = android::hardware::EventFlag::deleteEventFlag(&efGroup);
+    ASSERT_EQ(android::NO_ERROR, status);
+}
+
+/*
+ * Test on an EventFlag with no wakeup, short timeout.
+ */
+TYPED_TEST(BlockingReadWrites, ShortEventFlagWaitWithoutWakeTest) {
+    std::atomic<uint32_t> eventFlagWord;
+    std::atomic_init(&eventFlagWord, static_cast<uint32_t>(kFmqNotFull));
+    android::hardware::EventFlag* efGroup = nullptr;
+    android::status_t status =
+            android::hardware::EventFlag::createEventFlag(&eventFlagWord, &efGroup);
+    ASSERT_EQ(android::NO_ERROR, status);
+    ASSERT_NE(nullptr, efGroup);
+
+    uint32_t efState = 0;
+    android::status_t ret = efGroup->wait(kFmqNotEmpty, &efState, 1 /* ns */, true /* retry */);
+    ASSERT_EQ(android::TIMED_OUT, ret);
+
+    status = android::hardware::EventFlag::deleteEventFlag(&efGroup);
+    ASSERT_EQ(android::NO_ERROR, status);
+}
+
+/*
+ * Test FMQ write and read with event flag wait.
+ */
+TYPED_TEST(BlockingReadWrites, FmqWriteAndReadWithShortEventFlagWaitTest) {
+    android::hardware::EventFlag* efGroup = nullptr;
+    android::status_t status = android::hardware::EventFlag::createEventFlag(&this->mFw, &efGroup);
+    ASSERT_EQ(android::NO_ERROR, status);
+    ASSERT_NE(nullptr, efGroup);
+
+    /*
+     * After waiting for some time write into the FMQ
+     * and call Wake on kFmqNotEmpty.
+     */
+    const size_t dataLen = 16;
+    uint8_t dataW[dataLen] = {0};
+    uint8_t dataR[dataLen] = {0};
+    ASSERT_TRUE(this->mQueue->write(dataW, dataLen));
+    status = efGroup->wake(kFmqNotEmpty);
+    ASSERT_EQ(android::NO_ERROR, status);
+
+    ASSERT_TRUE(this->mQueue->readBlocking(dataR, dataLen, static_cast<uint32_t>(kFmqNotEmpty),
+                                           static_cast<uint32_t>(kFmqNotFull), 1 /* timeOutNanos */,
+                                           efGroup));
+    ASSERT_EQ(0, memcmp(dataW, dataR, dataLen));
 
     status = android::hardware::EventFlag::deleteEventFlag(&efGroup);
     ASSERT_EQ(android::NO_ERROR, status);
