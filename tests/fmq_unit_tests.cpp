@@ -1283,3 +1283,12 @@ TEST(MessageQueueErasedTest, MQErasedCompiles) {
     auto txn = AidlMessageQueueSync::MemRegion();
     txn.getLengthInBytes();
 }
+
+extern "C" uint8_t fmq_rust_test(void);
+
+/*
+ * Test using the FMQ from Rust.
+ */
+TEST(RustInteropTest, Simple) {
+    ASSERT_EQ(fmq_rust_test(), 1);
+}
