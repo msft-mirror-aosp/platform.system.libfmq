@@ -216,7 +216,7 @@ class ClientUnsyncTestBase<MessageQueueUnsync> : public ::testing::Test {
             // "Real" HALs shouldn't be doing this.
             waitForHwService(ITestMsgQ::descriptor, "default");
             sp<ITestMsgQ> service = ITestMsgQ::getService();
-            CHECK(nullptr == service);
+            CHECK(nullptr != service);
             return service;
         } else {
             return nullptr;
