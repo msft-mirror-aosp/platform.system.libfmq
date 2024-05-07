@@ -68,21 +68,27 @@ struct MessageQueueBase {
                            0) {}
 
     /**
+     * @param pointerCorruptionDetected Optional output parameter which indicates
+     * a mismatch between internal pointers indicating possible queue memory corruption.
+     *
      * @return Number of items of type T that can be written into the FMQ
      * without a read.
      */
-    size_t availableToWrite() const;
+    size_t availableToWrite(bool* pointerCorruptionDetected = nullptr) const;
 
     /**
+     * @param pointerCorruptionDetected Optional output parameter which indicates
+     * a mismatch between internal pointers indicating possible queue memory corruption.
+     *
      * @return Number of items of type T that are waiting to be read from the
      * FMQ.
      */
-    size_t availableToRead() const;
+    size_t availableToRead(bool* pointerCorruptionDetected = nullptr) const;
 
     /**
      * Returns the size of type T in bytes.
      *
-     * @param Size of T.
+     * @return Size of T.
      */
     size_t getQuantumSize() const;
 
@@ -427,8 +433,8 @@ struct MessageQueueBase {
     uint8_t* getRingBufferPtr() const { return mRing; }
 
   private:
-    size_t availableToWriteBytes() const;
-    size_t availableToReadBytes() const;
+    size_t availableToWriteBytes(bool* pointerCorruptionDetected) const;
+    size_t availableToReadBytes(bool* pointerCorruptionDetected) const;
 
     MessageQueueBase(const MessageQueueBase& other) = delete;
     MessageQueueBase& operator=(const MessageQueueBase& other) = delete;
@@ -1046,26 +1052,36 @@ bool MessageQueueBase<MQDescriptorType, T, flavor>::readBlocking(T* data, size_t
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWriteBytes() const {
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWriteBytes(
+        bool* pointerCorruptionDetected) const {
     size_t queueSizeBytes = mDesc->getSize();
-    size_t availableBytes = availableToReadBytes();
+    size_t availableBytes = availableToReadBytes(pointerCorruptionDetected);
     if (queueSizeBytes < availableBytes) {
         hardware::details::logError(
-                "The write or read pointer has become corrupted. Reading from the queue is no "
-                "longer possible.");
+                "The write or read pointer has become corrupted. Writing to the queue is no "
+                "longer possible. Queue size: " +
+                std::to_string(queueSizeBytes) + ", available: " + std::to_string(availableBytes));
+        if (pointerCorruptionDetected != nullptr) {
+            *pointerCorruptionDetected = true;
+        }
         return 0;
+    }
+    if (pointerCorruptionDetected != nullptr) {
+        *pointerCorruptionDetected = false;
     }
     return queueSizeBytes - availableBytes;
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWrite() const {
-    return availableToWriteBytes() / sizeof(T);
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWrite(
+        bool* pointerCorruptionDetected) const {
+    return availableToWriteBytes(pointerCorruptionDetected) / sizeof(T);
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToRead() const {
-    return availableToReadBytes() / sizeof(T);
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToRead(
+        bool* pointerCorruptionDetected) const {
+    return availableToReadBytes(pointerCorruptionDetected) / sizeof(T);
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
@@ -1137,7 +1153,8 @@ MessageQueueBase<MQDescriptorType, T, flavor>::commitWrite(size_t nMessages) {
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes() const {
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes(
+        bool* pointerCorruptionDetected) const {
     /*
      * This method is invoked by implementations of both read() and write() and
      * hence requires a memory_order_acquired load for both mReadPtr and
@@ -1148,8 +1165,15 @@ size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes() con
     if (writePtr < readPtr) {
         hardware::details::logError(
                 "The write or read pointer has become corrupted. Reading from the queue is no "
-                "longer possible.");
+                "longer possible. Write pointer: " +
+                std::to_string(writePtr) + ", read pointer: " + std::to_string(readPtr));
+        if (pointerCorruptionDetected != nullptr) {
+            *pointerCorruptionDetected = true;
+        }
         return 0;
+    }
+    if (pointerCorruptionDetected != nullptr) {
+        *pointerCorruptionDetected = false;
     }
     return writePtr - readPtr;
 }
