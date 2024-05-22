@@ -35,6 +35,10 @@ namespace android {
 template <template <typename, MQFlavor> class MQDescriptorType, typename T, MQFlavor flavor>
 struct MessageQueueBase {
     typedef MQDescriptorType<T, flavor> Descriptor;
+    enum Error : int {
+        NONE,
+        POINTER_CORRUPTION, /** Read/write pointers mismatch */
+    };
 
     /**
      * @param Desc MQDescriptor describing the FMQ.
@@ -68,21 +72,33 @@ struct MessageQueueBase {
                            0) {}
 
     /**
+     * @param errorDetected Optional output parameter which indicates
+     * any errors that the client might care about.
+     * @param errorMessage Optional output parameter for a human-readable
+     * error description.
+     *
      * @return Number of items of type T that can be written into the FMQ
      * without a read.
      */
-    size_t availableToWrite() const;
+    size_t availableToWrite(Error* errorDetected = nullptr,
+                            std::string* errorMessage = nullptr) const;
 
     /**
+     * @param errorDetected Optional output parameter which indicates
+     * any errors that the client might care about.
+     * @param errorMessage Optional output parameter for a human-readable
+     * error description.
+     *
      * @return Number of items of type T that are waiting to be read from the
      * FMQ.
      */
-    size_t availableToRead() const;
+    size_t availableToRead(Error* errorDetected = nullptr,
+                           std::string* errorMessage = nullptr) const;
 
     /**
      * Returns the size of type T in bytes.
      *
-     * @param Size of T.
+     * @return Size of T.
      */
     size_t getQuantumSize() const;
 
@@ -427,8 +443,8 @@ struct MessageQueueBase {
     uint8_t* getRingBufferPtr() const { return mRing; }
 
   private:
-    size_t availableToWriteBytes() const;
-    size_t availableToReadBytes() const;
+    size_t availableToWriteBytes(Error* errorDetected, std::string* errorMessage) const;
+    size_t availableToReadBytes(Error* errorDetected, std::string* errorMessage) const;
 
     MessageQueueBase(const MessageQueueBase& other) = delete;
     MessageQueueBase& operator=(const MessageQueueBase& other) = delete;
@@ -1046,26 +1062,44 @@ bool MessageQueueBase<MQDescriptorType, T, flavor>::readBlocking(T* data, size_t
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWriteBytes() const {
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWriteBytes(
+        Error* errorDetected, std::string* errorMessage) const {
     size_t queueSizeBytes = mDesc->getSize();
-    size_t availableBytes = availableToReadBytes();
+    Error localErrorDetected = Error::NONE;
+    size_t availableBytes = availableToReadBytes(&localErrorDetected, errorMessage);
+    if (localErrorDetected != Error::NONE) {
+        if (errorDetected != nullptr) {
+            *errorDetected = localErrorDetected;
+        }
+        return 0;
+    }
     if (queueSizeBytes < availableBytes) {
-        hardware::details::logError(
-                "The write or read pointer has become corrupted. Reading from the queue is no "
-                "longer possible.");
+        std::string errorMsg =
+                "The write or read pointer has become corrupted. Writing to the queue is no "
+                "longer possible. Queue size: " +
+                std::to_string(queueSizeBytes) + ", available: " + std::to_string(availableBytes);
+        hardware::details::logError(errorMsg);
+        if (errorDetected != nullptr) {
+            *errorDetected = Error::POINTER_CORRUPTION;
+        }
+        if (errorMessage != nullptr) {
+            *errorMessage = std::move(errorMsg);
+        }
         return 0;
     }
     return queueSizeBytes - availableBytes;
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWrite() const {
-    return availableToWriteBytes() / sizeof(T);
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWrite(
+        Error* errorDetected, std::string* errorMessage) const {
+    return availableToWriteBytes(errorDetected, errorMessage) / sizeof(T);
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToRead() const {
-    return availableToReadBytes() / sizeof(T);
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToRead(
+        Error* errorDetected, std::string* errorMessage) const {
+    return availableToReadBytes(errorDetected, errorMessage) / sizeof(T);
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
@@ -1137,7 +1171,8 @@ MessageQueueBase<MQDescriptorType, T, flavor>::commitWrite(size_t nMessages) {
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes() const {
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes(
+        Error* errorDetected, std::string* errorMessage) const {
     /*
      * This method is invoked by implementations of both read() and write() and
      * hence requires a memory_order_acquired load for both mReadPtr and
@@ -1146,9 +1181,17 @@ size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes() con
     uint64_t writePtr = mWritePtr->load(std::memory_order_acquire);
     uint64_t readPtr = mReadPtr->load(std::memory_order_acquire);
     if (writePtr < readPtr) {
-        hardware::details::logError(
+        std::string errorMsg =
                 "The write or read pointer has become corrupted. Reading from the queue is no "
-                "longer possible.");
+                "longer possible. Write pointer: " +
+                std::to_string(writePtr) + ", read pointer: " + std::to_string(readPtr);
+        hardware::details::logError(errorMsg);
+        if (errorDetected != nullptr) {
+            *errorDetected = Error::POINTER_CORRUPTION;
+        }
+        if (errorMessage != nullptr) {
+            *errorMessage = std::move(errorMsg);
+        }
         return 0;
     }
     return writePtr - readPtr;
