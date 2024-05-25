@@ -1274,3 +1274,12 @@ TYPED_TEST(UnsynchronizedWriteTest, ReadWriteWrapAround) {
     ASSERT_TRUE(this->mQueue->read(&readData[0], this->mNumMessagesMax));
     ASSERT_EQ(data, readData);
 }
+
+/*
+ * Ensure that the template specialization of MessageQueueBase to element types
+ * other than MQErased exposes its static knowledge of element size.
+ */
+TEST(MessageQueueErasedTest, MQErasedCompiles) {
+    auto txn = AidlMessageQueueSync::MemRegion();
+    txn.getLengthInBytes();
+}

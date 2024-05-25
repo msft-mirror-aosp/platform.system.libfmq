@@ -104,6 +104,17 @@ struct AidlMessageQueue final
         : AidlMessageQueue(numElementsInQueue, configureEventFlagWord, android::base::unique_fd(),
                            0) {}
 
+    template <typename V = T>
+    AidlMessageQueue(size_t numElementsInQueue, bool configureEventFlagWord = false,
+                     std::enable_if_t<std::is_same_v<V, MQErased>, size_t> quantum = sizeof(T))
+        : AidlMessageQueue(numElementsInQueue, configureEventFlagWord, android::base::unique_fd(),
+                           0, quantum) {}
+
+    template <typename V = T>
+    AidlMessageQueue(size_t numElementsInQueue, bool configureEventFlagWord,
+                     android::base::unique_fd bufferFd, size_t bufferSize,
+                     std::enable_if_t<std::is_same_v<V, MQErased>, size_t> quantum);
+
     MQDescriptor<T, U> dupeDesc();
 
   private:
@@ -122,6 +133,15 @@ AidlMessageQueue<T, U>::AidlMessageQueue(size_t numElementsInQueue, bool configu
                                          android::base::unique_fd bufferFd, size_t bufferSize)
     : MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value>(
               numElementsInQueue, configureEventFlagWord, std::move(bufferFd), bufferSize) {}
+
+template <typename T, typename U>
+template <typename V>
+AidlMessageQueue<T, U>::AidlMessageQueue(
+        size_t numElementsInQueue, bool configureEventFlagWord, android::base::unique_fd bufferFd,
+        size_t bufferSize, std::enable_if_t<std::is_same_v<V, MQErased>, size_t> quantum)
+    : MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value>(
+              numElementsInQueue, configureEventFlagWord, std::move(bufferFd), bufferSize,
+              quantum) {}
 
 template <typename T, typename U>
 MQDescriptor<T, U> AidlMessageQueue<T, U>::dupeDesc() {
