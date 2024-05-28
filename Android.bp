@@ -76,3 +76,124 @@ cc_library_headers {
     export_include_dirs: ["base"],
     min_sdk_version: "29",
 }
+
+cc_library {
+    name: "libfmq_erased",
+    shared_libs: [
+        "libbase",
+        "liblog",
+        "libcutils",
+        "libfmq",
+        "android.hardware.common.fmq-V1-ndk",
+    ],
+    srcs: [
+        "ErasedMessageQueue.cpp",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+    vendor_available: true,
+    min_sdk_version: "29",
+    host_supported: true,
+}
+
+rust_bindgen {
+    name: "libfmq_bindgen",
+    wrapper_src: "ErasedMessageQueue.hpp",
+    crate_name: "fmq_bindgen",
+    edition: "2021",
+    host_supported: true,
+    source_stem: "fmq",
+    bindgen_flags: [
+        "--no-recursive-allowlist",
+        "--use-core",
+        "--ctypes-prefix=core::ffi",
+        "--raw-line=#![no_std]",
+        "--raw-line=pub use android_hardware_common_fmq::aidl::android::hardware::common::fmq::{MQDescriptor::MQDescriptor, UnsynchronizedWrite::UnsynchronizedWrite, SynchronizedReadWrite::SynchronizedReadWrite, GrantorDescriptor::GrantorDescriptor};",
+        "--raw-line=pub use android_hardware_common::{aidl::android::hardware::common::NativeHandle::NativeHandle, binder::ParcelFileDescriptor};",
+        "--raw-line=pub enum android_MQErased {}",
+        "--raw-line=#[repr(C)]",
+        "--raw-line=pub struct aidl_android_hardware_common_fmq_GrantorDescriptor {",
+        "--raw-line=    pub fdIndex: i32,",
+        "--raw-line=    pub offset: i32,",
+        "--raw-line=    pub extent: i64,",
+        "--raw-line=}",
+        "--opaque-type=ErasedMessageQueueDesc",
+        "--opaque-type=.*AidlMessageQueue",
+        "--with-derive-default",
+        "--no-default=MessageQueueDesc",
+        "--no-default=ErasedMessageQueue",
+        "--allowlist-function=convertGrantor",
+        "--allowlist-function=convertDesc",
+        "--allowlist-function=freeDesc",
+        "--allowlist-type=ndk::ScopedFileDescriptor",
+        "--allowlist-function=descGrantors",
+        "--allowlist-function=descNumGrantors",
+        "--allowlist-function=descHandleFDs",
+        "--allowlist-function=descHandleNumFDs",
+        "--allowlist-function=descHandleInts",
+        "--allowlist-function=descHandleNumInts",
+        "--allowlist-function=descQuantum",
+        "--allowlist-function=descFlags",
+        "--allowlist-type=\\bErasedMessageQueue",
+        "--allowlist-type=\\bErasedMessageQueueDesc",
+        "--allowlist-type=\\bMemTransaction",
+        "--allowlist-type=.*MemTransaction.*MemRegion.*",
+        "--blocklist-type=std::.+",
+        "--allowlist-function=.*ErasedMessageQueue.*",
+        "--allowlist-function=.*beginWrite",
+        "--allowlist-function=.*beginRead",
+        "--allowlist-function=.*commitWrite",
+        "--allowlist-function=.*commitRead",
+        "--allowlist-function=getAddress",
+        "--allowlist-function=getLength.*",
+        "--allowlist-function=get(First|Second)Region",
+    ],
+    rustlibs: [
+        "android.hardware.common.fmq-V1-rust",
+        "android.hardware.common-V2-rust",
+    ],
+    static_libs: [
+        "libfmq",
+    ],
+    whole_static_libs: [
+        "libfmq_erased",
+    ],
+    shared_libs: [
+        "libc++",
+        "liblog",
+        "android.hardware.common.fmq-V1-ndk",
+    ],
+    apex_available: [
+    ],
+}
+
+rust_test {
+    host_supported: true,
+    name: "libfmq_bindgen_test",
+    srcs: [":libfmq_bindgen"],
+    crate_name: "fmq_bindgen_test",
+    test_suites: ["general-tests"],
+    auto_gen_config: true,
+    clippy_lints: "none",
+    lints: "none",
+    rustlibs: [
+        "android.hardware.common.fmq-V1-rust",
+        "android.hardware.common-V2-rust",
+    ],
+}
+
+rust_library {
+    name: "libfmq_rust",
+    host_supported: true,
+    crate_name: "fmq",
+    srcs: ["libfmq.rs"],
+    edition: "2021",
+    rustlibs: [
+        "libfmq_bindgen",
+        "liblog_rust",
+        "libzerocopy",
+    ],
+    proc_macros: [],
+}
