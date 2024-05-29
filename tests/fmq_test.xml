@@ -25,9 +25,13 @@
 
       <option name="push" value="fmq_test_client32->/data/nativetest/fmq_test_client/fmq_test_client" />
       <option name="push" value="fmq_test_client64->/data/nativetest64/fmq_test_client/fmq_test_client" />
+      <option name="push" value="fmq_rust_test_client32->/data/nativetest/fmq_rust_test_client/fmq_rust_test_client" />
+      <option name="push" value="fmq_rust_test_client64->/data/nativetest64/fmq_rust_test_client/fmq_rust_test_client" />
 
       <option name="push" value="android.hardware.tests.msgq@1.0-service-test32->/data/nativetest/android.hardware.tests.msgq@1.0-service-test/android.hardware.tests.msgq@1.0-service-test" />
       <option name="push" value="android.hardware.tests.msgq@1.0-service-test64->/data/nativetest64/android.hardware.tests.msgq@1.0-service-test/android.hardware.tests.msgq@1.0-service-test" />
+      <option name="push" value="android.hardware.tests.msgq@1.0-rust-service-test32->/data/nativetest/android.hardware.tests.msgq@1.0-rust-service-test/android.hardware.tests.msgq@1.0-rust-service-test" />
+      <option name="push" value="android.hardware.tests.msgq@1.0-rust-service-test64->/data/nativetest64/android.hardware.tests.msgq@1.0-rust-service-test/android.hardware.tests.msgq@1.0-rust-service-test" />
 
       <option name="cleanup" value="true" />
     </target_preparer>
