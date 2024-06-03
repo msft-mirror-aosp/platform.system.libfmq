@@ -25,6 +25,7 @@
 #include <sys/resource.h>
 #include <atomic>
 #include <cstdlib>
+#include <filesystem>
 #include <sstream>
 #include <thread>
 
@@ -374,20 +375,26 @@ TEST_F(HidlOnlyBadQueueConfig, ExtentTooLarge) {
     close(ashmemFd);
 }
 
-// If this test fails and we do leak FDs, the next test will cause a crash
+long numFds() {
+    return std::distance(std::filesystem::directory_iterator("/proc/self/fd"),
+                         std::filesystem::directory_iterator{});
+}
+
 TEST_F(AidlOnlyBadQueueConfig, LookForLeakedFds) {
+    // create/destroy a large number of queues that if we were leaking FDs
+    // we could detect it by looking at the number of FDs opened by the this
+    // test process.
+    constexpr uint32_t kNumQueues = 100;
     const size_t kPageSize = getpagesize();
     size_t numElementsInQueue = SIZE_MAX / sizeof(uint32_t) - kPageSize - 1;
-    struct rlimit rlim;
-    ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &rlim), 0);
-    for (int i = 0; i <= rlim.rlim_cur + 1; i++) {
+    long numFdsBefore = numFds();
+    for (int i = 0; i < kNumQueues; i++) {
         android::AidlMessageQueue<uint32_t, SynchronizedReadWrite> fmq(numElementsInQueue);
         ASSERT_FALSE(fmq.isValid());
     }
-    // try to get another FD
-    int fd = ashmem_create_region("test", 100);
-    ASSERT_NE(fd, -1);
-    close(fd);
+    long numFdsAfter = numFds();
+    EXPECT_LT(numFdsAfter, kNumQueues);
+    EXPECT_EQ(numFdsAfter, numFdsBefore);
 }
 
 TEST_F(Hidl2AidlOperation, ConvertDescriptorsSync) {
@@ -1273,4 +1280,22 @@ TYPED_TEST(UnsynchronizedWriteTest, ReadWriteWrapAround) {
     ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
     ASSERT_TRUE(this->mQueue->read(&readData[0], this->mNumMessagesMax));
     ASSERT_EQ(data, readData);
+}
+
+/*
+ * Ensure that the template specialization of MessageQueueBase to element types
+ * other than MQErased exposes its static knowledge of element size.
+ */
+TEST(MessageQueueErasedTest, MQErasedCompiles) {
+    auto txn = AidlMessageQueueSync::MemRegion();
+    txn.getLengthInBytes();
+}
+
+extern "C" uint8_t fmq_rust_test(void);
+
+/*
+ * Test using the FMQ from Rust.
+ */
+TEST(RustInteropTest, Simple) {
+    ASSERT_EQ(fmq_rust_test(), 1);
 }

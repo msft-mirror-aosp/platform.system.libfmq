@@ -44,6 +44,7 @@ using ::aidl::android::fmq::test::ITestAidlMsgQ;
 using android::hardware::tests::msgq::V1_0::ITestMsgQ;
 
 // libhidl
+using android::hardware::isHidlSupported;
 using android::hardware::kSynchronizedReadWrite;
 using android::hardware::kUnsynchronizedWrite;
 using android::hardware::MessageQueue;
@@ -98,6 +99,7 @@ class ClientSyncTestBase<AidlMessageQueueSync> : public ::testing::Test {
     static std::shared_ptr<ITestAidlMsgQ> waitGetTestService() {
         const std::string instance = std::string() + ITestAidlMsgQ::descriptor + "/default";
         ndk::SpAIBinder binder(AServiceManager_getService(instance.c_str()));
+        CHECK(nullptr != binder);
         return ITestAidlMsgQ::fromBinder(binder);
     }
     bool configureFmqSyncReadWrite(AidlMessageQueueSync* mq) {
@@ -124,11 +126,17 @@ template <>
 class ClientSyncTestBase<MessageQueueSync> : public ::testing::Test {
   protected:
     static sp<ITestMsgQ> waitGetTestService() {
-        android::hardware::details::setTrebleTestingOverride(true);
-        // waitForHwService is required because ITestMsgQ is not in manifest.xml.
-        // "Real" HALs shouldn't be doing this.
-        waitForHwService(ITestMsgQ::descriptor, "default");
-        return ITestMsgQ::getService();
+        if (isHidlSupported()) {
+            android::hardware::details::setTrebleTestingOverride(true);
+            // waitForHwService is required because ITestMsgQ is not in manifest.xml.
+            // "Real" HALs shouldn't be doing this.
+            waitForHwService(ITestMsgQ::descriptor, "default");
+            sp<ITestMsgQ> service = ITestMsgQ::getService();
+            CHECK(nullptr != service);
+            return service;
+        } else {
+            return nullptr;
+        }
     }
     bool configureFmqSyncReadWrite(MessageQueueSync* mq) {
         auto ret = mService->configureFmqSyncReadWrite(*mq->getDesc());
@@ -156,6 +164,7 @@ class ClientUnsyncTestBase<AidlMessageQueueUnsync> : public ::testing::Test {
     static std::shared_ptr<ITestAidlMsgQ> waitGetTestService() {
         const std::string instance = std::string() + ITestAidlMsgQ::descriptor + "/default";
         ndk::SpAIBinder binder(AServiceManager_getService(instance.c_str()));
+        CHECK(nullptr != binder);
         return ITestAidlMsgQ::fromBinder(binder);
     }
     bool getFmqUnsyncWrite(bool configureFmq, bool userFd, std::shared_ptr<ITestAidlMsgQ> service,
@@ -201,11 +210,17 @@ template <>
 class ClientUnsyncTestBase<MessageQueueUnsync> : public ::testing::Test {
   protected:
     static sp<ITestMsgQ> waitGetTestService() {
-        android::hardware::details::setTrebleTestingOverride(true);
-        // waitForHwService is required because ITestMsgQ is not in manifest.xml.
-        // "Real" HALs shouldn't be doing this.
-        waitForHwService(ITestMsgQ::descriptor, "default");
-        return ITestMsgQ::getService();
+        if (isHidlSupported()) {
+            android::hardware::details::setTrebleTestingOverride(true);
+            // waitForHwService is required because ITestMsgQ is not in manifest.xml.
+            // "Real" HALs shouldn't be doing this.
+            waitForHwService(ITestMsgQ::descriptor, "default");
+            sp<ITestMsgQ> service = ITestMsgQ::getService();
+            CHECK(nullptr != service);
+            return service;
+        } else {
+            return nullptr;
+        }
     }
     bool getFmqUnsyncWrite(bool configureFmq, bool userFd, sp<ITestMsgQ> service,
                            MessageQueueUnsync** queue) {
@@ -258,7 +273,7 @@ class SynchronizedReadWriteClient : public ClientSyncTestBase<typename T::MQType
 
     virtual void SetUp() {
         this->mService = this->waitGetTestService();
-        ASSERT_NE(this->mService, nullptr);
+        if (this->mService == nullptr) GTEST_SKIP() << "HIDL is not supported";
         ASSERT_TRUE(this->mService->isRemote());
         static constexpr size_t kSyncElementSizeBytes = sizeof(int32_t);
         android::base::unique_fd ringbufferFd;
@@ -289,7 +304,7 @@ class UnsynchronizedWriteClient : public ClientUnsyncTestBase<typename T::MQType
 
     virtual void SetUp() {
         this->mService = this->waitGetTestService();
-        ASSERT_NE(this->mService, nullptr);
+        if (this->mService == nullptr) GTEST_SKIP() << "HIDL is not supported";
         ASSERT_TRUE(this->mService->isRemote());
         this->getFmqUnsyncWrite(true, false, this->mService, &this->mQueue);
         ASSERT_NE(nullptr, this->mQueue);
