@@ -171,6 +171,11 @@ status_t EventFlag::wait(uint32_t bitmask,
     int64_t prevTimeNs = shouldTimeOut ? android::elapsedRealtimeNano() : 0;
     status_t status;
     while (true) {
+        status = waitHelper(bitmask, efState, timeoutNanoSeconds);
+        if ((status != -EAGAIN) && (status != -EINTR)) {
+            break;
+        }
+
         if (shouldTimeOut) {
             int64_t currentTimeNs = android::elapsedRealtimeNano();
             /*
@@ -184,11 +189,6 @@ status_t EventFlag::wait(uint32_t bitmask,
                 *efState = 0;
                 break;
             }
-        }
-
-        status = waitHelper(bitmask, efState, timeoutNanoSeconds);
-        if ((status != -EAGAIN) && (status != -EINTR)) {
-            break;
         }
     }
     return status;

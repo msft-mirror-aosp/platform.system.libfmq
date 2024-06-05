@@ -44,14 +44,15 @@ static constexpr int kBlockingTimeoutNs = 100000;
  * to set a reasonable limit if we want to avoid those asserts.
  */
 static constexpr size_t kAlignment = 8;
-static constexpr size_t kMaxNumElements = PAGE_SIZE * 10 / sizeof(payload_t) - kAlignment + 1;
+static const size_t kPageSize = getpagesize();
+static const size_t kMaxNumElements = kPageSize * 10 / sizeof(payload_t) - kAlignment + 1;
 /*
  * limit the custom grantor case to one page of memory.
  * If we want to increase this, we need to make sure that all of grantors offset
  * plus extent are less than the size of the page aligned ashmem region that is
  * created
  */
-static constexpr size_t kMaxCustomGrantorMemoryBytes = PAGE_SIZE;
+static const size_t kMaxCustomGrantorMemoryBytes = kPageSize;
 
 /*
  * The read counter can be found in the shared memory 16 bytes before the start
@@ -202,7 +203,7 @@ void writer(const Desc& desc, Queue& writeMq, FuzzedDataProvider& fdp, bool user
                 *readCounter = fdp.ConsumeIntegral<uint64_t>();
             }
         }
-        *firstStart = fdp.ConsumeIntegral<payload_t>();
+        *firstStart = fdp.ConsumeIntegral<uint8_t>();
 
         writeMq.commitWrite(numElements);
     }
@@ -217,7 +218,7 @@ void writerBlocking(Queue& writeMq, FuzzedDataProvider& fdp,
         size_t count = fdp.ConsumeIntegralInRange<size_t>(0, writeMq.getQuantumCount() + 1);
         std::vector<payload_t> data;
         for (int i = 0; i < count; i++) {
-            data.push_back(fdp.ConsumeIntegral<payload_t>());
+            data.push_back(fdp.ConsumeIntegral<uint8_t>());
         }
         writeMq.writeBlocking(data.data(), count, kBlockingTimeoutNs);
     }
@@ -249,14 +250,14 @@ inline std::optional<Desc> getAidlDesc(std::unique_ptr<Queue>& queue, FuzzedData
         std::vector<aidl::android::hardware::common::fmq::GrantorDescriptor> grantors;
         size_t numGrantors = fdp.ConsumeIntegralInRange<size_t>(0, 4);
         for (int i = 0; i < numGrantors; i++) {
-            grantors.push_back({fdp.ConsumeIntegralInRange<int32_t>(-2, 2) /* fdIndex */,
+            grantors.push_back({fdp.ConsumeIntegralInRange<int32_t>(0, 2) /* fdIndex */,
                                 fdp.ConsumeIntegralInRange<int32_t>(
                                         0, kMaxCustomGrantorMemoryBytes) /* offset */,
                                 fdp.ConsumeIntegralInRange<int64_t>(
                                         0, kMaxCustomGrantorMemoryBytes) /* extent */});
-            // ashmem region is PAGE_SIZE and we need to make sure all of the
+            // ashmem region is kPageSize and we need to make sure all of the
             // pointers and data region fit inside
-            if (grantors.back().offset + grantors.back().extent > PAGE_SIZE) return std::nullopt;
+            if (grantors.back().offset + grantors.back().extent > kPageSize) return std::nullopt;
         }
 
         android::base::unique_fd fd(
@@ -302,9 +303,9 @@ inline std::optional<Desc> getHidlDesc(std::unique_ptr<Queue>& queue, FuzzedData
                                         0, kMaxCustomGrantorMemoryBytes) /* offset */,
                                 fdp.ConsumeIntegralInRange<uint64_t>(
                                         0, kMaxCustomGrantorMemoryBytes) /* extent */});
-            // ashmem region is PAGE_SIZE and we need to make sure all of the
+            // ashmem region is kPageSize and we need to make sure all of the
             // pointers and data region fit inside
-            if (grantors.back().offset + grantors.back().extent > PAGE_SIZE) return std::nullopt;
+            if (grantors.back().offset + grantors.back().extent > kPageSize) return std::nullopt;
         }
 
         native_handle_t* handle = native_handle_create(1, 0);

@@ -51,6 +51,10 @@ cc_fuzz {
         libfuzzer_options: [
             "max_len=50000",
         ],
+        use_for_presubmit: true,
+    },
+    sanitize: {
+        integer_overflow: true,
     },
 
     host_supported: true,
