@@ -94,6 +94,7 @@ cc_library {
         "-Werror",
     ],
     vendor_available: true,
+    product_available: true,
     min_sdk_version: "29",
     host_supported: true,
 }
@@ -104,6 +105,8 @@ rust_bindgen {
     crate_name: "fmq_bindgen",
     edition: "2021",
     host_supported: true,
+    vendor_available: true,
+    product_available: true,
     visibility: [":__subpackages__"],
     source_stem: "fmq",
     bindgen_flags: [
@@ -188,6 +191,8 @@ rust_test {
 rust_library {
     name: "libfmq_rust",
     host_supported: true,
+    vendor_available: true,
+    product_available: true,
     visibility: [":__subpackages__"],
     crate_name: "fmq",
     srcs: ["libfmq.rs"],
