@@ -104,6 +104,7 @@ rust_bindgen {
     crate_name: "fmq_bindgen",
     edition: "2021",
     host_supported: true,
+    visibility: [":__subpackages__"],
     source_stem: "fmq",
     bindgen_flags: [
         "--no-recursive-allowlist",
@@ -187,6 +188,7 @@ rust_test {
 rust_library {
     name: "libfmq_rust",
     host_supported: true,
+    visibility: [":__subpackages__"],
     crate_name: "fmq",
     srcs: ["libfmq.rs"],
     edition: "2021",
