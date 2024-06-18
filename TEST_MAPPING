@@ -9,7 +9,7 @@
   ],
   "postsubmit": [
     {
-      "name": "fmq_bindgen_test"
+      "name": "libfmq_bindgen_test"
     }
   ],
   "hwasan-presubmit": [
