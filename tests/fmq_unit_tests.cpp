@@ -35,8 +35,8 @@ using android::hardware::kSynchronizedReadWrite;
 using android::hardware::kUnsynchronizedWrite;
 
 enum EventFlagBits : uint32_t {
-    kFmqNotEmpty = 1 << 0,
-    kFmqNotFull = 1 << 1,
+    kFmqNotFull = 1 << 0,
+    kFmqNotEmpty = 1 << 1,
 };
 
 typedef android::AidlMessageQueue<uint8_t, SynchronizedReadWrite> AidlMessageQueueSync;
