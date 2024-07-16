@@ -30,11 +30,7 @@ cc_library {
     ],
     apex_available: [
         "//apex_available:platform",
-        "com.android.btservices",
-        "com.android.media.swcodec",
-        "com.android.neuralnetworks",
-        "test_com.android.media.swcodec",
-        "test_com.android.neuralnetworks",
+        "//apex_available:anyapex",
     ],
     export_include_dirs: ["include"],
     local_include_dirs: ["include"],
@@ -94,6 +90,7 @@ cc_library {
         "-Werror",
     ],
     vendor_available: true,
+    product_available: true,
     min_sdk_version: "29",
     host_supported: true,
 }
@@ -104,6 +101,8 @@ rust_bindgen {
     crate_name: "fmq_bindgen",
     edition: "2021",
     host_supported: true,
+    vendor_available: true,
+    product_available: true,
     visibility: [":__subpackages__"],
     source_stem: "fmq",
     bindgen_flags: [
@@ -188,6 +187,8 @@ rust_test {
 rust_library {
     name: "libfmq_rust",
     host_supported: true,
+    vendor_available: true,
+    product_available: true,
     visibility: [":__subpackages__"],
     crate_name: "fmq",
     srcs: ["libfmq.rs"],
