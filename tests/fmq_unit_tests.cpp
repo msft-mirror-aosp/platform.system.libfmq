@@ -381,6 +381,8 @@ long numFds() {
 }
 
 TEST_F(AidlOnlyBadQueueConfig, LookForLeakedFds) {
+    // Write a log msg first to open the pmsg FD and socket to logd.
+    LOG(INFO) << "Nothin' to see here...";
     // create/destroy a large number of queues that if we were leaking FDs
     // we could detect it by looking at the number of FDs opened by the this
     // test process.
