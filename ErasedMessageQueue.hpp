@@ -161,5 +161,5 @@ class ErasedMessageQueue {
      * @return ErasedMessageQueueDesc The copied descriptor, which must be freed
      * by passing it to freeDesc.
      */
-    ErasedMessageQueueDesc* dupeDesc();
+    ErasedMessageQueueDesc* dupeDesc() const;
 };
