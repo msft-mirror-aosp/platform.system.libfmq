@@ -202,7 +202,7 @@ impl<T: Share> MessageQueue<T> {
 
     /// Obtain a copy of the MessageQueue's descriptor, which may be used to
     /// access it remotely.
-    pub fn dupe_desc(&mut self) -> MQDescriptor<T, SynchronizedReadWrite> {
+    pub fn dupe_desc(&self) -> MQDescriptor<T, SynchronizedReadWrite> {
         // SAFETY: dupeDesc may be called on any valid ErasedMessageQueue; it
         // simply forwards to dupeDesc on the inner AidlMessageQueue and wraps
         // in a heap allocation.

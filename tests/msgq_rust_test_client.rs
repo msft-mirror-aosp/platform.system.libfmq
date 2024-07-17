@@ -33,7 +33,7 @@ fn setup_test_service() -> (MessageQueue<i32>, Strong<dyn ITestAidlMsgQ>) {
     let num_elements_in_sync_queue: usize = (page_size - 16) / std::mem::size_of::<i32>();
 
     /* Create a queue on the client side. */
-    let mut mq = MessageQueue::<i32>::new(
+    let mq = MessageQueue::<i32>::new(
         num_elements_in_sync_queue,
         true, /* configure event flag word */
     );
