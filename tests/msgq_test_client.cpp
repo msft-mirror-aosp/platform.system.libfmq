@@ -42,6 +42,12 @@ using ::aidl::android::fmq::test::FixedParcelable;
 using ::aidl::android::fmq::test::FixedUnion;
 using ::aidl::android::fmq::test::ITestAidlMsgQ;
 using android::hardware::tests::msgq::V1_0::ITestMsgQ;
+static_assert(static_cast<uint32_t>(ITestMsgQ::EventFlagBits::FMQ_NOT_FULL) ==
+                      static_cast<uint32_t>(EventFlagBits::FMQ_NOT_FULL),
+              "The AIDL and HIDL test interfaces must use the same values!");
+static_assert(static_cast<uint32_t>(ITestMsgQ::EventFlagBits::FMQ_NOT_EMPTY) ==
+                      static_cast<uint32_t>(EventFlagBits::FMQ_NOT_EMPTY),
+              "The AIDL and HIDL test interfaces must use the same values!");
 
 // libhidl
 using android::hardware::isHidlSupported;

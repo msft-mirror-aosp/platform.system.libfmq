@@ -242,10 +242,18 @@ impl<T: Share> MessageQueue<T> {
         // Calls to the descFoo accessors on erased_desc are sound because we know inner.dupeDesc
         // returns a valid pointer to a new heap-allocated ErasedMessageQueueDesc.
         let (grantors, fds, ints, quantum, flags) = unsafe {
-            use std::slice::from_raw_parts;
-            let grantors = from_raw_parts(descGrantors(erased_desc), descNumGrantors(erased_desc));
-            let fds = from_raw_parts(descHandleFDs(erased_desc), descHandleNumFDs(erased_desc));
-            let ints = from_raw_parts(descHandleInts(erased_desc), descHandleNumInts(erased_desc));
+            let grantors = slice_from_raw_parts_or_empty(
+                descGrantors(erased_desc),
+                descNumGrantors(erased_desc),
+            );
+            let fds = slice_from_raw_parts_or_empty(
+                descHandleFDs(erased_desc),
+                descHandleNumFDs(erased_desc),
+            );
+            let ints = slice_from_raw_parts_or_empty(
+                descHandleInts(erased_desc),
+                descHandleNumInts(erased_desc),
+            );
             let quantum = descQuantum(erased_desc);
             let flags = descFlags(erased_desc);
             (grantors, fds, ints, quantum, flags)
@@ -287,6 +295,25 @@ impl<T: Share> MessageQueue<T> {
         // pointers and lengths pointing into the queue. The pointer to txn is
         // not stored.
         unsafe { self.inner.beginWrite(n, addr_of_mut!(txn)) }.then_some(txn)
+    }
+}
+
+/// Forms a slice from a pointer and a length.
+///
+/// Returns an empty slice when `data` is a null pointer and `len` is zero.
+///
+/// # Safety
+///
+/// This function has the same safety requirements as [`std::slice::from_raw_parts`],
+/// but unlike that function, does not exhibit undefined behavior when `data` is a
+/// null pointer and `len` is zero. In this case, it returns an empty slice.
+unsafe fn slice_from_raw_parts_or_empty<'a, T>(data: *const T, len: usize) -> &'a [T] {
+    if data.is_null() && len == 0 {
+        &[]
+    } else {
+        // SAFETY: The caller must guarantee to satisfy the safety requirements
+        // of the standard library function [`std::slice::from_raw_parts`].
+        unsafe { std::slice::from_raw_parts(data, len) }
     }
 }
 
@@ -431,5 +458,35 @@ impl<T: Share> MessageQueue<T> {
         // pointers and lengths pointing into the queue. The pointer to txn is
         // not stored.
         unsafe { self.inner.beginRead(n, addr_of_mut!(txn)) }.then_some(txn)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn slice_from_raw_parts_or_empty_with_nonempty() {
+        const SLICE: &[u8] = &[1, 2, 3, 4, 5, 6];
+        // SAFETY: We are constructing a slice from the pointer and length of valid slice.
+        let from_raw_parts = unsafe {
+            let ptr = SLICE.as_ptr();
+            let len = SLICE.len();
+            slice_from_raw_parts_or_empty(ptr, len)
+        };
+        assert_eq!(SLICE, from_raw_parts);
+    }
+
+    #[test]
+    fn slice_from_raw_parts_or_empty_with_null_pointer_zero_length() {
+        // SAFETY: Calling `slice_from_raw_parts_or_empty` with a null pointer
+        // and a zero length is explicitly allowed by its safety requirements.
+        // In this case, `std::slice::from_raw_parts` has undefined behavior.
+        let empty_from_raw_parts = unsafe {
+            let ptr: *const u8 = std::ptr::null();
+            let len = 0;
+            slice_from_raw_parts_or_empty(ptr, len)
+        };
+        assert_eq!(&[] as &[u8], empty_from_raw_parts);
     }
 }

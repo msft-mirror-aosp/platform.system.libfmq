@@ -35,8 +35,8 @@ using android::hardware::kSynchronizedReadWrite;
 using android::hardware::kUnsynchronizedWrite;
 
 enum EventFlagBits : uint32_t {
-    kFmqNotEmpty = 1 << 0,
-    kFmqNotFull = 1 << 1,
+    kFmqNotFull = 1 << 0,
+    kFmqNotEmpty = 1 << 1,
 };
 
 typedef android::AidlMessageQueue<uint8_t, SynchronizedReadWrite> AidlMessageQueueSync;
@@ -381,6 +381,8 @@ long numFds() {
 }
 
 TEST_F(AidlOnlyBadQueueConfig, LookForLeakedFds) {
+    // Write a log msg first to open the pmsg FD and socket to logd.
+    LOG(INFO) << "Nothin' to see here...";
     // create/destroy a large number of queues that if we were leaking FDs
     // we could detect it by looking at the number of FDs opened by the this
     // test process.
