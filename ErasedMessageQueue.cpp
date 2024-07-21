@@ -112,6 +112,6 @@ bool ErasedMessageQueue::commitRead(size_t nMessages) {
     return inner->commitRead(nMessages);
 }
 
-ErasedMessageQueueDesc* ErasedMessageQueue::dupeDesc() {
+ErasedMessageQueueDesc* ErasedMessageQueue::dupeDesc() const {
     return new ErasedMessageQueueDesc(inner->dupeDesc());
 }
