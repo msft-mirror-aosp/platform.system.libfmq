@@ -7,6 +7,11 @@
       "name": "fmq_test"
     }
   ],
+  "postsubmit": [
+    {
+      "name": "libfmq_bindgen_test"
+    }
+  ],
   "hwasan-presubmit": [
     {
       "name": "fmq_unit_tests"
