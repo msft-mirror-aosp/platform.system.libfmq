@@ -23,7 +23,7 @@
 NativeHandle convertHandle(const int* fds, size_t n_fds, const int32_t* ints, size_t n_ints) {
     std::vector<ndk::ScopedFileDescriptor> fdv;
     for (size_t i = 0; i < n_fds; i++) {
-        fdv.push_back(std::move(ndk::ScopedFileDescriptor(fds[i])));
+        fdv.push_back(std::move(ndk::ScopedFileDescriptor(dup(fds[i]))));
     }
     std::vector<int32_t> intv(ints, ints + n_ints);
 
@@ -112,6 +112,6 @@ bool ErasedMessageQueue::commitRead(size_t nMessages) {
     return inner->commitRead(nMessages);
 }
 
-ErasedMessageQueueDesc* ErasedMessageQueue::dupeDesc() {
+ErasedMessageQueueDesc* ErasedMessageQueue::dupeDesc() const {
     return new ErasedMessageQueueDesc(inner->dupeDesc());
 }
