@@ -115,7 +115,7 @@ struct AidlMessageQueue final
                      android::base::unique_fd bufferFd, size_t bufferSize,
                      std::enable_if_t<std::is_same_v<V, MQErased>, size_t> quantum);
 
-    MQDescriptor<T, U> dupeDesc();
+    MQDescriptor<T, U> dupeDesc() const;
 
   private:
     AidlMessageQueue(const AidlMessageQueue& other) = delete;
@@ -144,7 +144,7 @@ AidlMessageQueue<T, U>::AidlMessageQueue(
               quantum) {}
 
 template <typename T, typename U>
-MQDescriptor<T, U> AidlMessageQueue<T, U>::dupeDesc() {
+MQDescriptor<T, U> AidlMessageQueue<T, U>::dupeDesc() const {
     auto* shim = MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value>::getDesc();
     if (shim) {
         std::vector<aidl::android::hardware::common::fmq::GrantorDescriptor> grantors;
