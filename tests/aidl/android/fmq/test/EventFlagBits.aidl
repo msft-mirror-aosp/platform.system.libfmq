@@ -4,6 +4,6 @@ package android.fmq.test;
 
 @Backing(type="int")
 enum EventFlagBits {
-    FMQ_NOT_EMPTY = 1 << 0,
-    FMQ_NOT_FULL = 1 << 1,
+    FMQ_NOT_FULL = 1 << 0,
+    FMQ_NOT_EMPTY = 1 << 1,
 }
