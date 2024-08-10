@@ -24,16 +24,14 @@ rust_library {
     srcs: ["TestAidlMsgQ.rs"],
 
     rustlibs: [
+        "android.fmq.test-rust",
+        "android.hardware.common.fmq-V1-rust",
         "libfmq_rust",
     ],
     shared_libs: [
         "libbase",
         "libcutils",
         "libutils",
-    ],
-    rlibs: [
-        "android.hardware.common.fmq-V1-rust",
-        "android.fmq.test-rust",
     ],
 
     crate_name: "fmq_test_service_rust_impl",
