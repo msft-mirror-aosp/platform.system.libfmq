@@ -59,7 +59,7 @@ ndk::ScopedAStatus TestAidlMsgQ::getFmqUnsyncWrite(
         (mqDesc == nullptr)) {
         *_aidl_return = false;
     } else {
-        *mqDesc = std::move(mFmqUnsynchronized->dupeDesc());
+        *mqDesc = mFmqUnsynchronized->dupeDesc();
         // set write-protection so readers can't mmap and write
         int res = ashmem_set_prot_region(mqDesc->handle.fds[0].get(), PROT_READ);
         if (res == -1) {
