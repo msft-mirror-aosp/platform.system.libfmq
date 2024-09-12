@@ -45,6 +45,8 @@ typedef android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite> Message
 typedef android::hardware::MessageQueue<uint8_t, kUnsynchronizedWrite> MessageQueueUnsync;
 typedef android::AidlMessageQueue<uint16_t, SynchronizedReadWrite> AidlMessageQueueSync16;
 typedef android::hardware::MessageQueue<uint16_t, kSynchronizedReadWrite> MessageQueueSync16;
+typedef android::AidlMessageQueue<uint16_t, UnsynchronizedWrite> AidlMessageQueueUnsync16;
+typedef android::hardware::MessageQueue<uint16_t, kUnsynchronizedWrite> MessageQueueUnsync16;
 
 typedef android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite> MessageQueueSync8;
 typedef android::hardware::MQDescriptor<uint8_t, kSynchronizedReadWrite> HidlMQDescSync8;
@@ -80,6 +82,11 @@ typedef ::testing::Types<TestParamTypes<AidlMessageQueueUnsync, SetupType::SINGL
                          TestParamTypes<AidlMessageQueueUnsync, SetupType::DOUBLE_FD>,
                          TestParamTypes<MessageQueueUnsync, SetupType::DOUBLE_FD>>
         UnsyncTypes;
+typedef ::testing::Types<TestParamTypes<AidlMessageQueueUnsync16, SetupType::SINGLE_FD>,
+                         TestParamTypes<MessageQueueUnsync16, SetupType::SINGLE_FD>,
+                         TestParamTypes<AidlMessageQueueUnsync16, SetupType::DOUBLE_FD>,
+                         TestParamTypes<MessageQueueUnsync16, SetupType::DOUBLE_FD>>
+        TwoByteUnsyncTypes;
 typedef ::testing::Types<TestParamTypes<AidlMessageQueueSync16, SetupType::SINGLE_FD>,
                          TestParamTypes<MessageQueueSync16, SetupType::SINGLE_FD>,
                          TestParamTypes<AidlMessageQueueSync16, SetupType::DOUBLE_FD>,
@@ -227,6 +234,35 @@ class QueueSizeOdd : public TestBase<T> {
 
 TYPED_TEST_CASE(BadQueueConfig, BadConfigTypes);
 
+TYPED_TEST_CASE(UnsynchronizedOverflowHistoryTest, TwoByteUnsyncTypes);
+
+template <typename T>
+class UnsynchronizedOverflowHistoryTest : public TestBase<T> {
+  protected:
+    virtual void TearDown() { delete mQueue; }
+
+    virtual void SetUp() {
+        static constexpr size_t kNumElementsInQueue = 2048;
+        static constexpr size_t kPayloadSizeBytes = 2;
+        if (T::Setup == SetupType::SINGLE_FD) {
+            mQueue = new (std::nothrow) typename T::MQType(kNumElementsInQueue);
+        } else {
+            android::base::unique_fd ringbufferFd(::ashmem_create_region(
+                    "UnsyncHistory", kNumElementsInQueue * kPayloadSizeBytes));
+            mQueue = new (std::nothrow)
+                    typename T::MQType(kNumElementsInQueue, false, std::move(ringbufferFd),
+                                       kNumElementsInQueue * kPayloadSizeBytes);
+        }
+        ASSERT_NE(nullptr, mQueue);
+        ASSERT_TRUE(mQueue->isValid());
+        mNumMessagesMax = mQueue->getQuantumCount();
+        ASSERT_EQ(kNumElementsInQueue, mNumMessagesMax);
+    }
+
+    typename T::MQType* mQueue = nullptr;
+    size_t mNumMessagesMax = 0;
+};
+
 template <typename T>
 class BadQueueConfig : public TestBase<T> {};
 
@@ -238,7 +274,8 @@ class DoubleFdFailures : public ::testing::Test {};
 /*
  * Utility function to initialize data to be written to the FMQ
  */
-inline void initData(uint8_t* data, size_t count) {
+template <typename T>
+inline void initData(T* data, size_t count) {
     for (size_t i = 0; i < count; i++) {
         data[i] = i & 0xFF;
     }
@@ -1300,4 +1337,70 @@ extern "C" uint8_t fmq_rust_test(void);
  */
 TEST(RustInteropTest, Simple) {
     ASSERT_EQ(fmq_rust_test(), 1);
+}
+
+/*
+ * Verifies that after ring buffer overflow and first failed attempt to read
+ * the whole ring buffer is available to read and old values was discarded.
+ */
+TYPED_TEST(UnsynchronizedOverflowHistoryTest, ReadAfterOverflow) {
+    std::vector<uint16_t> data(this->mNumMessagesMax);
+
+    // Fill the queue with monotonic pattern
+    initData(&data[0], this->mNumMessagesMax);
+    ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
+
+    // Write more data (first element of the same data) to cause a wrap around
+    ASSERT_TRUE(this->mQueue->write(&data[0], 1));
+
+    // Attempt a read (this should fail due to how UnsynchronizedWrite works)
+    uint16_t readDataPlaceholder;
+    ASSERT_FALSE(this->mQueue->read(&readDataPlaceholder, 1));
+
+    // Verify 1/2 of the ring buffer is available to read
+    ASSERT_EQ(this->mQueue->availableToRead(), this->mQueue->getQuantumCount() / 2);
+
+    // Next read should succeed as the queue read pointer have been reset in previous read.
+    std::vector<uint16_t> readData(this->mQueue->availableToRead());
+    ASSERT_TRUE(this->mQueue->read(readData.data(), readData.size()));
+
+    // Verify that the tail of the data is preserved in history after partial wrap around
+    // and followed by the new data.
+    std::rotate(data.begin(), data.begin() + 1, data.end());
+
+    // Compare in reverse to match tail of the data with readData
+    ASSERT_TRUE(std::equal(readData.rbegin(), readData.rend(), data.rbegin()));
+}
+
+/*
+ * Verifies that after ring buffer overflow between beginRead() and failed commitRead()
+ * the whole ring buffer is available to read and old values was discarded.
+ */
+TYPED_TEST(UnsynchronizedOverflowHistoryTest, CommitReadAfterOverflow) {
+    std::vector<uint16_t> data(this->mNumMessagesMax);
+
+    // Fill the queue with monotonic pattern
+    initData(&data[0], this->mNumMessagesMax);
+    ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
+
+    typename TypeParam::MQType::MemTransaction tx;
+    ASSERT_TRUE(this->mQueue->beginRead(this->mNumMessagesMax, &tx));
+
+    // Write more data (first element of the same data) to cause a wrap around
+    ASSERT_TRUE(this->mQueue->write(&data[0], 1));
+
+    // Attempt to commit a read should fail due to ring buffer wrap around
+    ASSERT_FALSE(this->mQueue->commitRead(this->mNumMessagesMax));
+
+    // Verify 1/2 of the ring buffer is available to read
+    ASSERT_EQ(this->mQueue->availableToRead(), this->mQueue->getQuantumCount() / 2);
+
+    // Next read should succeed as the queue read pointer have been reset in previous commitRead.
+    std::vector<uint16_t> readData(this->mQueue->availableToRead());
+    ASSERT_TRUE(this->mQueue->read(readData.data(), readData.size()));
+
+    // Verify that the tail of the data is preserved in history after partial wrap around
+    // and followed by the new data.
+    std::rotate(data.begin(), data.begin() + 1, data.end());
+    ASSERT_TRUE(std::equal(readData.rbegin(), readData.rend(), data.rbegin()));
 }
