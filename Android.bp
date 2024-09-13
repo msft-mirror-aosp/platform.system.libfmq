@@ -184,12 +184,15 @@ rust_test {
     ],
 }
 
-rust_library {
-    name: "libfmq_rust",
+rust_defaults {
+    name: "libfmq_rust_defaults",
     host_supported: true,
     vendor_available: true,
     product_available: true,
-    visibility: [":__subpackages__"],
+    visibility: [
+        ":__subpackages__",
+        "//system/software_defined_vehicle/core_services/sdv_comms:__subpackages__",
+    ],
     crate_name: "fmq",
     srcs: ["libfmq.rs"],
     edition: "2021",
@@ -199,4 +202,17 @@ rust_library {
         "libzerocopy",
     ],
     proc_macros: [],
+}
+
+rust_library {
+    name: "libfmq_rust",
+    defaults: ["libfmq_rust_defaults"],
+}
+
+rust_test {
+    name: "libfmq_rust_unit_test",
+    defaults: ["libfmq_rust_defaults"],
+    test_options: {
+        unit_test: true,
+    },
 }
