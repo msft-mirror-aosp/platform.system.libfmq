@@ -24,7 +24,7 @@
 #include <utils/Log.h>
 #include <utils/SystemClock.h>
 #include <atomic>
-#include <new>
+#include <functional>
 
 using android::hardware::kSynchronizedReadWrite;
 using android::hardware::kUnsynchronizedWrite;
@@ -46,6 +46,7 @@ struct MessageQueueBase {
         NONE,
         POINTER_CORRUPTION, /** Read/write pointers mismatch */
     };
+    using ErrorHandler = std::function<void(Error, std::string&&)>;
 
     /**
      * @param Desc MQDescriptor describing the FMQ.
@@ -86,28 +87,22 @@ struct MessageQueueBase {
                            0) {}
 
     /**
-     * @param errorDetected Optional output parameter which indicates
-     * any errors that the client might care about.
-     * @param errorMessage Optional output parameter for a human-readable
-     * error description.
-     *
+     * Set a client side error handler function which will be invoked when the FMQ detects
+     * one of the error situations defined by the 'Error' type.
+     */
+    void setErrorHandler(ErrorHandler&& handler) { mErrorHandler.swap(handler); }
+
+    /**
      * @return Number of items of type T that can be written into the FMQ
      * without a read.
      */
-    size_t availableToWrite(Error* errorDetected = nullptr,
-                            std::string* errorMessage = nullptr) const;
+    size_t availableToWrite() const;
 
     /**
-     * @param errorDetected Optional output parameter which indicates
-     * any errors that the client might care about.
-     * @param errorMessage Optional output parameter for a human-readable
-     * error description.
-     *
      * @return Number of items of type T that are waiting to be read from the
      * FMQ.
      */
-    size_t availableToRead(Error* errorDetected = nullptr,
-                           std::string* errorMessage = nullptr) const;
+    size_t availableToRead() const;
 
     /**
      * Returns the size of type T in bytes.
@@ -482,8 +477,8 @@ struct MessageQueueBase {
               typename std::enable_if<!std::is_same<U, MQErased>::value, bool>::type = true>
     static constexpr size_t kQuantumValue = sizeof(T);
     inline size_t quantum() const;
-    size_t availableToWriteBytes(Error* errorDetected, std::string* errorMessage) const;
-    size_t availableToReadBytes(Error* errorDetected, std::string* errorMessage) const;
+    size_t availableToWriteBytes() const;
+    size_t availableToReadBytes() const;
 
     MessageQueueBase(const MessageQueueBase& other) = delete;
     MessageQueueBase& operator=(const MessageQueueBase& other) = delete;
@@ -515,6 +510,8 @@ struct MessageQueueBase {
      * lifetime.
      */
     android::hardware::EventFlag* mEventFlag = nullptr;
+
+    ErrorHandler mErrorHandler;
 
     const size_t kPageSize = getpagesize();
 };
@@ -1136,28 +1133,17 @@ inline size_t MessageQueueBase<MQDescriptorType, T, flavor>::quantum() const {
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWriteBytes(
-        Error* errorDetected, std::string* errorMessage) const {
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWriteBytes() const {
     size_t queueSizeBytes = mDesc->getSize();
-    Error localErrorDetected = Error::NONE;
-    size_t availableBytes = availableToReadBytes(&localErrorDetected, errorMessage);
-    if (localErrorDetected != Error::NONE) {
-        if (errorDetected != nullptr) {
-            *errorDetected = localErrorDetected;
-        }
-        return 0;
-    }
+    size_t availableBytes = availableToReadBytes();
     if (queueSizeBytes < availableBytes) {
         std::string errorMsg =
                 "The write or read pointer has become corrupted. Writing to the queue is no "
                 "longer possible. Queue size: " +
                 std::to_string(queueSizeBytes) + ", available: " + std::to_string(availableBytes);
         hardware::details::logError(errorMsg);
-        if (errorDetected != nullptr) {
-            *errorDetected = Error::POINTER_CORRUPTION;
-        }
-        if (errorMessage != nullptr) {
-            *errorMessage = std::move(errorMsg);
+        if (mErrorHandler) {
+            mErrorHandler(Error::POINTER_CORRUPTION, std::move(errorMsg));
         }
         return 0;
     }
@@ -1165,15 +1151,13 @@ size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWriteBytes(
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWrite(
-        Error* errorDetected, std::string* errorMessage) const {
-    return availableToWriteBytes(errorDetected, errorMessage) / quantum();
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToWrite() const {
+    return availableToWriteBytes() / quantum();
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToRead(
-        Error* errorDetected, std::string* errorMessage) const {
-    return availableToReadBytes(errorDetected, errorMessage) / quantum();
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToRead() const {
+    return availableToReadBytes() / quantum();
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
@@ -1192,10 +1176,15 @@ bool MessageQueueBase<MQDescriptorType, T, flavor>::beginWrite(size_t nMessages,
 
     auto writePtr = mWritePtr->load(std::memory_order_relaxed);
     if (writePtr % quantum() != 0) {
-        hardware::details::logError(
-                "The write pointer has become misaligned. Writing to the queue is no longer "
-                "possible.");
+        std::string errorMsg =
+                "The write pointer has become misaligned. Writing to the queue is not possible. "
+                "Pointer: " +
+                std::to_string(writePtr) + ", quantum: " + std::to_string(quantum());
+        hardware::details::logError(errorMsg);
         hardware::details::errorWriteLog(0x534e4554, "184963385");
+        if (mErrorHandler) {
+            mErrorHandler(Error::POINTER_CORRUPTION, std::move(errorMsg));
+        }
         return false;
     }
     size_t writeOffset = writePtr % mDesc->getSize();
@@ -1245,8 +1234,7 @@ MessageQueueBase<MQDescriptorType, T, flavor>::commitWrite(size_t nMessages) {
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
-size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes(
-        Error* errorDetected, std::string* errorMessage) const {
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes() const {
     /*
      * This method is invoked by implementations of both read() and write() and
      * hence requires a memory_order_acquired load for both mReadPtr and
@@ -1260,11 +1248,8 @@ size_t MessageQueueBase<MQDescriptorType, T, flavor>::availableToReadBytes(
                 "longer possible. Write pointer: " +
                 std::to_string(writePtr) + ", read pointer: " + std::to_string(readPtr);
         hardware::details::logError(errorMsg);
-        if (errorDetected != nullptr) {
-            *errorDetected = Error::POINTER_CORRUPTION;
-        }
-        if (errorMessage != nullptr) {
-            *errorMessage = std::move(errorMsg);
+        if (mErrorHandler) {
+            mErrorHandler(Error::POINTER_CORRUPTION, std::move(errorMsg));
         }
         return 0;
     }

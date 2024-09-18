@@ -754,6 +754,69 @@ TYPED_TEST(SynchronizedReadWriteClient, SmallInputWriterTest1) {
 }
 
 /*
+ * Write a message to the queue, get a pointer to the memory region for that
+ * first message. Set the write counter to the last byte in the ring buffer.
+ * Try another write, it should fail because the write address is misaligned.
+ */
+TYPED_TEST(SynchronizedReadWriteClient, MisalignedWriteCounterClientSide) {
+    if (TypeParam::UserFd) {
+        // When using the second FD for the ring buffer, we can't get to the read/write
+        // counters from a pointer to the ring buffer, so no sense in testing.
+        GTEST_SKIP();
+    }
+
+    bool errorCallbackTriggered = false;
+    auto errorHandler = [&errorCallbackTriggered](TypeParam::MQType::Error error, std::string&&) {
+        if (error == TypeParam::MQType::Error::POINTER_CORRUPTION) {
+            errorCallbackTriggered = true;
+        }
+    };
+    this->mQueue->setErrorHandler(errorHandler);
+    EXPECT_FALSE(errorCallbackTriggered);
+
+    const size_t dataLen = 1;
+    ASSERT_LE(dataLen, kNumElementsInSyncQueue);
+    int32_t data[dataLen];
+    initData(data, dataLen);
+    // begin write and get a MemTransaction object for the first object in the queue
+    typename TypeParam::MQType::MemTransaction tx;
+    ASSERT_TRUE(this->mQueue->beginWrite(dataLen, &tx));
+    EXPECT_FALSE(errorCallbackTriggered);
+
+    // get a pointer to the beginning of the ring buffer
+    const auto& region = tx.getFirstRegion();
+    int32_t* firstStart = region.getAddress();
+
+    // because this is the first location in the ring buffer, we can get
+    // access to the read and write pointer stored in the fd. 8 bytes back for the
+    // write counter and 16 bytes back for the read counter
+    uint64_t* writeCntr = (uint64_t*)((uint8_t*)firstStart - 8);
+
+    // set it to point to the very last byte in the ring buffer
+    *(writeCntr) = this->mQueue->getQuantumCount() * this->mQueue->getQuantumSize() - 1;
+    ASSERT_TRUE(*writeCntr % sizeof(int32_t) != 0);
+    EXPECT_FALSE(errorCallbackTriggered);
+
+    ASSERT_TRUE(this->mQueue->commitWrite(dataLen));
+    EXPECT_FALSE(errorCallbackTriggered);
+
+    // This next write will be misaligned and will overlap outside of the ring buffer.
+    // The write should fail.
+    EXPECT_FALSE(this->mQueue->write(data, dataLen));
+    EXPECT_TRUE(errorCallbackTriggered);
+
+    errorCallbackTriggered = false;
+    EXPECT_EQ(0, this->mQueue->availableToWrite());
+    EXPECT_TRUE(errorCallbackTriggered);
+
+    // Check that it is possible to reset the error handler.
+    errorCallbackTriggered = false;
+    this->mQueue->setErrorHandler(nullptr);
+    EXPECT_EQ(0, this->mQueue->availableToWrite());
+    EXPECT_FALSE(errorCallbackTriggered);
+}
+
+/*
  * Write a small number of messages to FMQ using the beginWrite()/CommitWrite()
  * APIs. Request mService to read and verify that the write was successful.
  */
