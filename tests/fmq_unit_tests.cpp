@@ -131,10 +131,10 @@ class SynchronizedReadWrites : public TestBase<T> {
     size_t mNumMessagesMax = 0;
 };
 
-TYPED_TEST_CASE(UnsynchronizedWriteTest, UnsyncTypes);
+TYPED_TEST_CASE(UnsynchronizedReadWriteTest, UnsyncTypes);
 
 template <typename T>
-class UnsynchronizedWriteTest : public TestBase<T> {
+class UnsynchronizedReadWriteTest : public TestBase<T> {
   protected:
     virtual void TearDown() {
         delete mQueue;
@@ -1155,7 +1155,7 @@ TYPED_TEST(SynchronizedReadWrites, ReadWriteWrapAround2) {
 /*
  * Verify that a few bytes of data can be successfully written and read.
  */
-TYPED_TEST(UnsynchronizedWriteTest, SmallInputTest1) {
+TYPED_TEST(UnsynchronizedReadWriteTest, SmallInputTest1) {
     const size_t dataLen = 16;
     ASSERT_LE(dataLen, this->mNumMessagesMax);
     uint8_t data[dataLen];
@@ -1170,7 +1170,7 @@ TYPED_TEST(UnsynchronizedWriteTest, SmallInputTest1) {
 /*
  * Verify that read() returns false when trying to read from an empty queue.
  */
-TYPED_TEST(UnsynchronizedWriteTest, ReadWhenEmpty) {
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadWhenEmpty) {
     ASSERT_EQ(0UL, this->mQueue->availableToRead());
     const size_t dataLen = 2;
     ASSERT_TRUE(dataLen < this->mNumMessagesMax);
@@ -1182,7 +1182,7 @@ TYPED_TEST(UnsynchronizedWriteTest, ReadWhenEmpty) {
  * Write the queue when full. Verify that a subsequent writes is succesful.
  * Verify that availableToWrite() returns 0 as expected.
  */
-TYPED_TEST(UnsynchronizedWriteTest, WriteWhenFull1) {
+TYPED_TEST(UnsynchronizedReadWriteTest, WriteWhenFull1) {
     ASSERT_EQ(0UL, this->mQueue->availableToRead());
     std::vector<uint8_t> data(this->mNumMessagesMax);
 
@@ -1200,7 +1200,7 @@ TYPED_TEST(UnsynchronizedWriteTest, WriteWhenFull1) {
  * using beginRead()/commitRead() is succesful.
  * Verify that the next read fails as expected for unsynchronized flavor.
  */
-TYPED_TEST(UnsynchronizedWriteTest, WriteWhenFull2) {
+TYPED_TEST(UnsynchronizedReadWriteTest, WriteWhenFull2) {
     ASSERT_EQ(0UL, this->mQueue->availableToRead());
     std::vector<uint8_t> data(this->mNumMessagesMax);
     ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
@@ -1223,7 +1223,7 @@ TYPED_TEST(UnsynchronizedWriteTest, WriteWhenFull2) {
  * Verify that the write is successful and the subsequent read
  * returns the expected data.
  */
-TYPED_TEST(UnsynchronizedWriteTest, LargeInputTest1) {
+TYPED_TEST(UnsynchronizedReadWriteTest, LargeInputTest1) {
     std::vector<uint8_t> data(this->mNumMessagesMax);
     initData(&data[0], this->mNumMessagesMax);
     ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
@@ -1237,7 +1237,7 @@ TYPED_TEST(UnsynchronizedWriteTest, LargeInputTest1) {
  * Verify that it fails. Verify that a subsequent read fails and
  * the queue is still empty.
  */
-TYPED_TEST(UnsynchronizedWriteTest, LargeInputTest2) {
+TYPED_TEST(UnsynchronizedReadWriteTest, LargeInputTest2) {
     ASSERT_EQ(0UL, this->mQueue->availableToRead());
     const size_t dataLen = 4096;
     ASSERT_GT(dataLen, this->mNumMessagesMax);
@@ -1255,7 +1255,7 @@ TYPED_TEST(UnsynchronizedWriteTest, LargeInputTest2) {
  * the attempt is succesful. Verify that the read fails
  * as expected.
  */
-TYPED_TEST(UnsynchronizedWriteTest, LargeInputTest3) {
+TYPED_TEST(UnsynchronizedReadWriteTest, LargeInputTest3) {
     std::vector<uint8_t> data(this->mNumMessagesMax);
     initData(&data[0], this->mNumMessagesMax);
     ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
@@ -1267,7 +1267,7 @@ TYPED_TEST(UnsynchronizedWriteTest, LargeInputTest3) {
 /*
  * Verify that multiple reads one after the other return expected data.
  */
-TYPED_TEST(UnsynchronizedWriteTest, MultipleRead) {
+TYPED_TEST(UnsynchronizedReadWriteTest, MultipleRead) {
     const size_t chunkSize = 100;
     const size_t chunkNum = 5;
     const size_t dataLen = chunkSize * chunkNum;
@@ -1285,7 +1285,7 @@ TYPED_TEST(UnsynchronizedWriteTest, MultipleRead) {
 /*
  * Verify that multiple writes one after the other happens correctly.
  */
-TYPED_TEST(UnsynchronizedWriteTest, MultipleWrite) {
+TYPED_TEST(UnsynchronizedReadWriteTest, MultipleWrite) {
     const size_t chunkSize = 100;
     const size_t chunkNum = 5;
     const size_t dataLen = chunkSize * chunkNum;
@@ -1308,7 +1308,7 @@ TYPED_TEST(UnsynchronizedWriteTest, MultipleWrite) {
  * Write mNumMessagesMax messages into the queue. This will cause a
  * wrap around. Read and verify the data.
  */
-TYPED_TEST(UnsynchronizedWriteTest, ReadWriteWrapAround) {
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadWriteWrapAround) {
     size_t numMessages = this->mNumMessagesMax - 1;
     std::vector<uint8_t> data(this->mNumMessagesMax);
     std::vector<uint8_t> readData(this->mNumMessagesMax);
@@ -1319,6 +1319,35 @@ TYPED_TEST(UnsynchronizedWriteTest, ReadWriteWrapAround) {
     ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
     ASSERT_TRUE(this->mQueue->read(&readData[0], this->mNumMessagesMax));
     ASSERT_EQ(data, readData);
+}
+
+/*
+ * Attempt to read more than the maximum number of messages in the queue.
+ */
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadMoreThanNumMessagesMaxFails) {
+    // Fill the queue with data
+    std::vector<uint8_t> data(this->mNumMessagesMax);
+    initData(data.data(), data.size());
+    ASSERT_TRUE(this->mQueue->write(data.data(), data.size()));
+
+    // Attempt to read more than the maximum number of messages in the queue.
+    std::vector<uint8_t> readData(this->mNumMessagesMax + 1);
+    ASSERT_FALSE(this->mQueue->read(readData.data(), readData.size()));
+}
+
+/*
+ * Write some data to the queue and attempt to read more than the available data.
+ */
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadMoreThanAvailableToReadFails) {
+    // Fill half of the queue with data.
+    size_t dataLen = this->mNumMessagesMax / 2;
+    std::vector<uint8_t> data(dataLen);
+    initData(data.data(), data.size());
+    ASSERT_TRUE(this->mQueue->write(data.data(), data.size()));
+
+    // Attempt to read more than the available data.
+    std::vector<uint8_t> readData(dataLen + 1);
+    ASSERT_FALSE(this->mQueue->read(readData.data(), readData.size()));
 }
 
 /*
