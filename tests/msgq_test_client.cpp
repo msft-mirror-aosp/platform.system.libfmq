@@ -381,7 +381,6 @@ TYPED_TEST(UnsynchronizedWriteClientMultiProcess, MultipleReadersAfterOverflow) 
 
         // Verify that the read is successful.
         ASSERT_TRUE(queue->read(&readData[0], dataLen));
-        ASSERT_TRUE(verifyData(&readData[0], dataLen));
 
         delete queue;
         exit(0);
@@ -415,7 +414,6 @@ TYPED_TEST(UnsynchronizedWriteClientMultiProcess, MultipleReadersAfterOverflow) 
 
         // verify that the read is successful.
         ASSERT_TRUE(queue->read(&readData[0], dataLen));
-        ASSERT_TRUE(verifyData(&readData[0], dataLen));
 
         delete queue;
         exit(0);
@@ -1048,21 +1046,25 @@ TYPED_TEST(UnsynchronizedWriteClient, LargeInputTest2) {
  * Write until FMQ is full.
  * Verify that another write attempt is successful.
  * Request this->mService to read. Verify that read is unsuccessful
- * because of the write rollover.
+ * because of the write overflow.
  * Perform another write and verify that the read is successful
  * to check if the reader process can recover from the error condition.
  */
 TYPED_TEST(UnsynchronizedWriteClient, LargeInputTest3) {
     ASSERT_TRUE(this->requestWriteFmqUnsync(this->mNumMessagesMax, this->mService));
     ASSERT_EQ(0UL, this->mQueue->availableToWrite());
+
+    int32_t readData;
     ASSERT_TRUE(this->requestWriteFmqUnsync(1, this->mService));
 
-    bool ret = this->requestReadFmqUnsync(this->mNumMessagesMax, this->mService);
-    ASSERT_FALSE(ret);
-    ASSERT_TRUE(this->requestWriteFmqUnsync(this->mNumMessagesMax, this->mService));
+    ASSERT_FALSE(this->mQueue->read(&readData, 1));
 
-    ret = this->requestReadFmqUnsync(this->mNumMessagesMax, this->mService);
-    ASSERT_TRUE(ret);
+    // Half of the buffer gets cleared on overflow so single item write will not
+    // cause another overflow.
+    ASSERT_TRUE(this->requestWriteFmqUnsync(1, this->mService));
+
+    // Half of the buffer plus a newly written element will be available.
+    ASSERT_TRUE(this->mQueue->read(&readData, 1));
 }
 
 /*
