@@ -491,6 +491,7 @@ struct MessageQueueBase {
     void* mapGrantorDescr(uint32_t grantorIdx);
     void unmapGrantorDescr(void* address, uint32_t grantorIdx);
     void initMemory(bool resetPointers);
+    bool processOverflow(uint64_t readPtr, uint64_t writePtr) const;
 
     enum DefaultEventNotification : uint32_t {
         /*
@@ -1284,6 +1285,28 @@ template <template <typename, MQFlavor> typename MQDescriptorType, typename T, M
  * and legal.
  */
 __attribute__((no_sanitize("integer"))) bool
+MessageQueueBase<MQDescriptorType, T, flavor>::processOverflow(uint64_t readPtr,
+                                                               uint64_t writePtr) const {
+    if (writePtr - readPtr > mDesc->getSize()) {
+        /*
+         * Preserved history can be as big as mDesc->getSize() but we expose only half of that.
+         * Half of the buffer will be discarded to make space for fast writers and
+         * reduce chance of repeated overflows. The other half is available to read.
+         */
+        size_t historyOffset = mDesc->getSize() / 2;
+        mReadPtr->store(writePtr - historyOffset, std::memory_order_release);
+        hardware::details::logError("Read failed after an overflow. Resetting read pointer.");
+        return true;
+    }
+    return false;
+}
+
+template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
+/*
+ * Disable integer sanitization since integer overflow here is allowed
+ * and legal.
+ */
+__attribute__((no_sanitize("integer"))) bool
 MessageQueueBase<MQDescriptorType, T, flavor>::beginRead(size_t nMessages,
                                                          MemTransaction* result) const {
     *result = MemTransaction();
@@ -1308,8 +1331,7 @@ MessageQueueBase<MQDescriptorType, T, flavor>::beginRead(size_t nMessages,
         return false;
     }
 
-    if (writePtr - readPtr > mDesc->getSize()) {
-        mReadPtr->store(writePtr, std::memory_order_release);
+    if (processOverflow(readPtr, writePtr)) {
         return false;
     }
 
@@ -1358,12 +1380,12 @@ MessageQueueBase<MQDescriptorType, T, flavor>::commitRead(size_t nMessages) {
     // TODO: Use a local copy of readPtr to avoid relazed mReadPtr loads.
     auto readPtr = mReadPtr->load(std::memory_order_relaxed);
     auto writePtr = mWritePtr->load(std::memory_order_acquire);
+
     /*
      * If the flavor is unsynchronized, it is possible that a write overflow may
      * have occurred between beginRead() and commitRead().
      */
-    if (writePtr - readPtr > mDesc->getSize()) {
-        mReadPtr->store(writePtr, std::memory_order_release);
+    if (processOverflow(readPtr, writePtr)) {
         return false;
     }
 
