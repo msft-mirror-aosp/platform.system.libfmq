@@ -1293,7 +1293,7 @@ MessageQueueBase<MQDescriptorType, T, flavor>::processOverflow(uint64_t readPtr,
          * Half of the buffer will be discarded to make space for fast writers and
          * reduce chance of repeated overflows. The other half is available to read.
          */
-        size_t historyOffset = mDesc->getSize() / 2;
+        size_t historyOffset = getQuantumCount() / 2 * getQuantumSize();
         mReadPtr->store(writePtr - historyOffset, std::memory_order_release);
         hardware::details::logError("Read failed after an overflow. Resetting read pointer.");
         return true;
