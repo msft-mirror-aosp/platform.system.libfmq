@@ -263,6 +263,35 @@ class UnsynchronizedOverflowHistoryTest : public TestBase<T> {
     size_t mNumMessagesMax = 0;
 };
 
+TYPED_TEST_CASE(UnsynchronizedOverflowHistoryTestSingleElement, TwoByteUnsyncTypes);
+
+template <typename T>
+class UnsynchronizedOverflowHistoryTestSingleElement : public TestBase<T> {
+  protected:
+    virtual void TearDown() { delete mQueue; }
+
+    virtual void SetUp() {
+        static constexpr size_t kNumElementsInQueue = 1;
+        static constexpr size_t kPayloadSizeBytes = 2;
+        if (T::Setup == SetupType::SINGLE_FD) {
+            mQueue = new (std::nothrow) typename T::MQType(kNumElementsInQueue);
+        } else {
+            android::base::unique_fd ringbufferFd(::ashmem_create_region(
+                    "UnsyncHistory", kNumElementsInQueue * kPayloadSizeBytes));
+            mQueue = new (std::nothrow)
+                    typename T::MQType(kNumElementsInQueue, false, std::move(ringbufferFd),
+                                       kNumElementsInQueue * kPayloadSizeBytes);
+        }
+        ASSERT_NE(nullptr, mQueue);
+        ASSERT_TRUE(mQueue->isValid());
+        mNumMessagesMax = mQueue->getQuantumCount();
+        ASSERT_EQ(kNumElementsInQueue, mNumMessagesMax);
+    }
+
+    typename T::MQType* mQueue = nullptr;
+    size_t mNumMessagesMax = 0;
+};
+
 template <typename T>
 class BadQueueConfig : public TestBase<T> {};
 
@@ -1432,4 +1461,31 @@ TYPED_TEST(UnsynchronizedOverflowHistoryTest, CommitReadAfterOverflow) {
     // and followed by the new data.
     std::rotate(data.begin(), data.begin() + 1, data.end());
     ASSERT_TRUE(std::equal(readData.rbegin(), readData.rend(), data.rbegin()));
+}
+
+/*
+ * Verifies a queue of a single element will fail a read after a write overflow
+ * and then recover.
+ */
+TYPED_TEST(UnsynchronizedOverflowHistoryTestSingleElement, ReadAfterOverflow) {
+    constexpr uint16_t kValue = 4;
+    std::vector<uint16_t> data = {kValue};
+
+    // single write/read works normally
+    ASSERT_TRUE(this->mQueue->write(&data[0], 1));
+    uint16_t readDataPlaceholder;
+    ASSERT_TRUE(this->mQueue->read(&readDataPlaceholder, 1));
+    EXPECT_EQ(readDataPlaceholder, kValue);
+
+    // Write more data (first element of the same data) to cause a wrap around
+    ASSERT_TRUE(this->mQueue->write(&data[0], 1));
+    ASSERT_TRUE(this->mQueue->write(&data[0], 1));
+
+    // Attempt a read (this should fail due to how UnsynchronizedWrite works)
+    ASSERT_FALSE(this->mQueue->read(&readDataPlaceholder, 1));
+
+    // Subsequent write/reads should work again
+    ASSERT_TRUE(this->mQueue->write(&data[0], 1));
+    ASSERT_TRUE(this->mQueue->read(&readDataPlaceholder, 1));
+    EXPECT_EQ(readDataPlaceholder, kValue);
 }
