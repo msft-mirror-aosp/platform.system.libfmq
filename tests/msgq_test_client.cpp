@@ -25,11 +25,17 @@
 #include <android-base/logging.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
+#include <android/fmq/test/FixedParcelable.h>
+#include <android/fmq/test/FixedUnion.h>
+#include <android/fmq/test/ITestAidlMsgQ.h>
 #include <android/hardware/tests/msgq/1.0/ITestMsgQ.h>
 #include <fmq/AidlMessageQueue.h>
+#include <fmq/AidlMessageQueueCpp.h>
 #include <fmq/EventFlag.h>
 #include <fmq/MessageQueue.h>
 #include <hidl/ServiceManagement.h>
+
+#include <binder/IServiceManager.h>
 
 // libutils:
 using android::OK;
@@ -41,6 +47,12 @@ using ::aidl::android::fmq::test::EventFlagBits;
 using ::aidl::android::fmq::test::FixedParcelable;
 using ::aidl::android::fmq::test::FixedUnion;
 using ::aidl::android::fmq::test::ITestAidlMsgQ;
+
+using cppEventFlagBits = ::android::fmq::test::EventFlagBits;
+using cppFixedParcelable = android::fmq::test::FixedParcelable;
+using cppFixedUnion = android::fmq::test::FixedUnion;
+using cppITestAidlMsgQ = ::android::fmq::test::ITestAidlMsgQ;
+
 using android::hardware::tests::msgq::V1_0::ITestMsgQ;
 static_assert(static_cast<uint32_t>(ITestMsgQ::EventFlagBits::FMQ_NOT_FULL) ==
                       static_cast<uint32_t>(EventFlagBits::FMQ_NOT_FULL),
@@ -60,14 +72,19 @@ using android::hardware::details::waitForHwService;
 
 using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
 using aidl::android::hardware::common::fmq::UnsynchronizedWrite;
+using cppSynchronizedReadWrite = ::android::hardware::common::fmq::SynchronizedReadWrite;
+using cppUnSynchronizedWrite = android::hardware::common::fmq::UnsynchronizedWrite;
 using android::hardware::kSynchronizedReadWrite;
 using android::hardware::kUnsynchronizedWrite;
 
 typedef android::AidlMessageQueue<int32_t, SynchronizedReadWrite> AidlMessageQueueSync;
 typedef android::AidlMessageQueue<int32_t, UnsynchronizedWrite> AidlMessageQueueUnsync;
+
+typedef android::AidlMessageQueueCpp<int32_t, cppSynchronizedReadWrite> cppAidlMessageQueueSync;
+typedef android::AidlMessageQueueCpp<int32_t, cppUnSynchronizedWrite> cppAidlMessageQueueUnsync;
+
 typedef android::hardware::MessageQueue<int32_t, kSynchronizedReadWrite> MessageQueueSync;
 typedef android::hardware::MessageQueue<int32_t, kUnsynchronizedWrite> MessageQueueUnsync;
-static const std::string kServiceName = "BnTestAidlMsgQ";
 static const size_t kPageSize = getpagesize();
 static const size_t kNumElementsInSyncQueue = (kPageSize - 16) / sizeof(int32_t);
 
@@ -85,13 +102,17 @@ class TestParamTypes {
 
 // Run everything on both the AIDL and HIDL versions with one and two FDs
 typedef ::testing::Types<TestParamTypes<AidlMessageQueueSync, SetupType::SINGLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueSync, SetupType::SINGLE_FD>,
                          TestParamTypes<MessageQueueSync, SetupType::SINGLE_FD>,
                          TestParamTypes<AidlMessageQueueSync, SetupType::DOUBLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueSync, SetupType::DOUBLE_FD>,
                          TestParamTypes<MessageQueueSync, SetupType::DOUBLE_FD>>
         SyncTypes;
 typedef ::testing::Types<TestParamTypes<AidlMessageQueueUnsync, SetupType::SINGLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueUnsync, SetupType::SINGLE_FD>,
                          TestParamTypes<MessageQueueUnsync, SetupType::SINGLE_FD>,
                          TestParamTypes<AidlMessageQueueUnsync, SetupType::DOUBLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueUnsync, SetupType::DOUBLE_FD>,
                          TestParamTypes<MessageQueueUnsync, SetupType::DOUBLE_FD>>
         UnsyncTypes;
 
@@ -106,7 +127,9 @@ class ClientSyncTestBase<AidlMessageQueueSync> : public ::testing::Test {
         const std::string instance = std::string() + ITestAidlMsgQ::descriptor + "/default";
         ndk::SpAIBinder binder(AServiceManager_getService(instance.c_str()));
         CHECK(nullptr != binder);
-        return ITestAidlMsgQ::fromBinder(binder);
+        auto ret = ITestAidlMsgQ::fromBinder(binder);
+        CHECK(ret->isRemote() == true);
+        return ret;
     }
     bool configureFmqSyncReadWrite(AidlMessageQueueSync* mq) {
         bool result = false;
@@ -127,6 +150,40 @@ class ClientSyncTestBase<AidlMessageQueueSync> : public ::testing::Test {
     std::shared_ptr<ITestAidlMsgQ> mService;
 };
 
+// Specialize for AIDL cpp backend
+template <>
+class ClientSyncTestBase<cppAidlMessageQueueSync> : public ::testing::Test {
+  protected:
+    static sp<cppITestAidlMsgQ> waitGetTestService() {
+        const std::string instance = std::string() + ITestAidlMsgQ::descriptor + "/default";
+        const android::String16 instanceString16(instance.c_str());
+        sp<cppITestAidlMsgQ> binder;
+        status_t err = getService(instanceString16, &binder);
+        if (err != OK) {
+            return nullptr;
+        }
+        CHECK(nullptr != binder);
+        return binder;
+    }
+    bool configureFmqSyncReadWrite(cppAidlMessageQueueSync* mq) {
+        bool result = false;
+        auto ret = mService->configureFmqSyncReadWrite(mq->dupeDesc(), &result);
+        return result && ret.isOk();
+    }
+    bool requestReadFmqSync(size_t dataLen) {
+        bool result = false;
+        auto ret = mService->requestReadFmqSync(dataLen, &result);
+        return result && ret.isOk();
+    }
+    bool requestWriteFmqSync(size_t dataLen) {
+        bool result = false;
+        auto ret = mService->requestWriteFmqSync(dataLen, &result);
+        return result && ret.isOk();
+    }
+
+    sp<cppITestAidlMsgQ> mService;
+};
+
 // Specialize for HIDL
 template <>
 class ClientSyncTestBase<MessageQueueSync> : public ::testing::Test {
@@ -139,6 +196,7 @@ class ClientSyncTestBase<MessageQueueSync> : public ::testing::Test {
             waitForHwService(ITestMsgQ::descriptor, "default");
             sp<ITestMsgQ> service = ITestMsgQ::getService();
             CHECK(nullptr != service);
+            CHECK(service->isRemote() == true);
             return service;
         } else {
             return nullptr;
@@ -171,7 +229,9 @@ class ClientUnsyncTestBase<AidlMessageQueueUnsync> : public ::testing::Test {
         const std::string instance = std::string() + ITestAidlMsgQ::descriptor + "/default";
         ndk::SpAIBinder binder(AServiceManager_getService(instance.c_str()));
         CHECK(nullptr != binder);
-        return ITestAidlMsgQ::fromBinder(binder);
+        auto ret = ITestAidlMsgQ::fromBinder(binder);
+        CHECK(ret->isRemote() == true);
+        return ret;
     }
     bool getFmqUnsyncWrite(bool configureFmq, bool userFd, std::shared_ptr<ITestAidlMsgQ> service,
                            AidlMessageQueueUnsync** queue) {
@@ -211,6 +271,58 @@ class ClientUnsyncTestBase<AidlMessageQueueUnsync> : public ::testing::Test {
     AidlMessageQueueUnsync* mQueue = nullptr;
 };
 
+// Specialize for AIDL cpp backend
+template <>
+class ClientUnsyncTestBase<cppAidlMessageQueueUnsync> : public ::testing::Test {
+  protected:
+    static sp<cppITestAidlMsgQ> waitGetTestService() {
+        const std::string instance = std::string() + ITestAidlMsgQ::descriptor + "/default";
+        const android::String16 instanceString16(instance.c_str());
+        sp<cppITestAidlMsgQ> binder;
+        status_t err = getService(instanceString16, &binder);
+        if (err != OK) {
+            return nullptr;
+        }
+        CHECK(nullptr != binder);
+        return binder;
+    }
+    bool getFmqUnsyncWrite(bool configureFmq, bool userFd, sp<cppITestAidlMsgQ> service,
+                           cppAidlMessageQueueUnsync** queue) {
+        bool result = false;
+        android::hardware::common::fmq::MQDescriptor<int32_t, cppUnSynchronizedWrite> desc;
+        auto ret = service->getFmqUnsyncWrite(configureFmq, userFd, &desc, &result);
+        *queue = new (std::nothrow) cppAidlMessageQueueUnsync(desc, false);
+        return result && ret.isOk();
+    }
+
+    sp<cppITestAidlMsgQ> getQueue(cppAidlMessageQueueUnsync** fmq, bool setupQueue, bool userFd) {
+        sp<cppITestAidlMsgQ> service = waitGetTestService();
+        if (service == nullptr) return nullptr;
+        getFmqUnsyncWrite(setupQueue, userFd, service, fmq);
+        return service;
+    }
+
+    bool requestReadFmqUnsync(size_t dataLen, sp<cppITestAidlMsgQ> service) {
+        bool result = false;
+        auto ret = service->requestReadFmqUnsync(dataLen, &result);
+        return result && ret.isOk();
+    }
+    bool requestWriteFmqUnsync(size_t dataLen, sp<cppITestAidlMsgQ> service) {
+        bool result = false;
+        auto ret = service->requestWriteFmqUnsync(dataLen, &result);
+        return result && ret.isOk();
+    }
+    cppAidlMessageQueueUnsync* newQueue() {
+        if (mQueue->isValid())
+            return new (std::nothrow) cppAidlMessageQueueUnsync(mQueue->dupeDesc(), false);
+        else
+            return nullptr;
+    }
+
+    sp<cppITestAidlMsgQ> mService;
+    cppAidlMessageQueueUnsync* mQueue = nullptr;
+};
+
 // Specialize for HIDL
 template <>
 class ClientUnsyncTestBase<MessageQueueUnsync> : public ::testing::Test {
@@ -223,6 +335,7 @@ class ClientUnsyncTestBase<MessageQueueUnsync> : public ::testing::Test {
             waitForHwService(ITestMsgQ::descriptor, "default");
             sp<ITestMsgQ> service = ITestMsgQ::getService();
             CHECK(nullptr != service);
+            CHECK(service->isRemote() == true);
             return service;
         } else {
             return nullptr;
@@ -280,7 +393,6 @@ class SynchronizedReadWriteClient : public ClientSyncTestBase<typename T::MQType
     virtual void SetUp() {
         this->mService = this->waitGetTestService();
         if (this->mService == nullptr) GTEST_SKIP() << "HIDL is not supported";
-        ASSERT_TRUE(this->mService->isRemote());
         static constexpr size_t kSyncElementSizeBytes = sizeof(int32_t);
         android::base::unique_fd ringbufferFd;
         if (T::UserFd) {
@@ -311,7 +423,6 @@ class UnsynchronizedWriteClient : public ClientUnsyncTestBase<typename T::MQType
     virtual void SetUp() {
         this->mService = this->waitGetTestService();
         if (this->mService == nullptr) GTEST_SKIP() << "HIDL is not supported";
-        ASSERT_TRUE(this->mService->isRemote());
         this->getFmqUnsyncWrite(true, false, this->mService, &this->mQueue);
         ASSERT_NE(nullptr, this->mQueue);
         ASSERT_TRUE(this->mQueue->isValid());
@@ -354,7 +465,6 @@ TYPED_TEST(UnsynchronizedWriteClientMultiProcess, MultipleReadersAfterOverflow) 
         auto service =
                 this->getQueue(&queue, true /* setupQueue */, TypeParam::UserFd /* userFd */);
         ASSERT_NE(service, nullptr);
-        ASSERT_TRUE(service->isRemote());
         ASSERT_NE(queue, nullptr);
         ASSERT_TRUE(queue->isValid());
 
@@ -397,7 +507,6 @@ TYPED_TEST(UnsynchronizedWriteClientMultiProcess, MultipleReadersAfterOverflow) 
         typename TypeParam::MQType* queue = nullptr;
         auto service = this->getQueue(&queue, false /* setupQueue */, false /* userFd */);
         ASSERT_NE(service, nullptr);
-        ASSERT_TRUE(service->isRemote());
         ASSERT_NE(queue, nullptr);
         ASSERT_TRUE(queue->isValid());
 

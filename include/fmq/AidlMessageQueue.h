@@ -13,73 +13,42 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #pragma once
-
 #include <aidl/android/hardware/common/fmq/MQDescriptor.h>
 #include <aidl/android/hardware/common/fmq/SynchronizedReadWrite.h>
 #include <aidl/android/hardware/common/fmq/UnsynchronizedWrite.h>
-#include <cutils/native_handle.h>
-#include <fmq/AidlMQDescriptorShim.h>
-#include <fmq/MessageQueueBase.h>
-#include <utils/Log.h>
-#include <type_traits>
+#include "AidlMQDescriptorShim.h"
+#include "AidlMessageQueueBase.h"
 
 namespace android {
-
 using aidl::android::hardware::common::fmq::MQDescriptor;
 using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
 using aidl::android::hardware::common::fmq::UnsynchronizedWrite;
 using android::details::AidlMQDescriptorShim;
 using android::hardware::MQFlavor;
 
-template <typename T>
-struct FlavorTypeToValue;
-
 template <>
-struct FlavorTypeToValue<SynchronizedReadWrite> {
+struct FlavorTypeToValue<aidl::android::hardware::common::fmq::SynchronizedReadWrite> {
     static constexpr MQFlavor value = hardware::kSynchronizedReadWrite;
 };
 
 template <>
-struct FlavorTypeToValue<UnsynchronizedWrite> {
+struct FlavorTypeToValue<aidl::android::hardware::common::fmq::UnsynchronizedWrite> {
     static constexpr MQFlavor value = hardware::kUnsynchronizedWrite;
 };
 
-typedef uint64_t RingBufferPosition;
-
-/*
- * AIDL parcelables will have the typedef fixed_size. It is std::true_type when the
- * parcelable is annotated with @FixedSize, and std::false_type when not. Other types
- * should not have the fixed_size typedef, so they will always resolve to std::false_type.
- */
-template <typename T, typename = void>
-struct has_typedef_fixed_size : std::false_type {};
-
-template <typename T>
-struct has_typedef_fixed_size<T, std::void_t<typename T::fixed_size>> : T::fixed_size {};
-
-#define STATIC_AIDL_TYPE_CHECK(T)                                                                  \
-    static_assert(has_typedef_fixed_size<T>::value == true || std::is_fundamental<T>::value ||     \
-                          std::is_enum<T>::value,                                                  \
-                  "Only fundamental types, enums, and AIDL parcelables annotated with @FixedSize " \
-                  "and built for the NDK backend are supported as payload types(T).");
+struct BackendTypesStore {
+    template <typename T, MQFlavor flavor>
+    using AidlMQDescriptorShimType = android::details::AidlMQDescriptorShim<T, flavor>;
+    using GrantorDescriptorType = aidl::android::hardware::common::fmq::GrantorDescriptor;
+    template <typename T, typename flavor>
+    using MQDescriptorType = aidl::android::hardware::common::fmq::MQDescriptor<T, flavor>;
+    using FileDescriptorType = ndk::ScopedFileDescriptor;
+    static FileDescriptorType createFromInt(int fd) { return FileDescriptorType(fd); }
+};
 
 template <typename T, typename U>
-struct AidlMessageQueue final
-    : public MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value> {
-    STATIC_AIDL_TYPE_CHECK(T);
-    typedef AidlMQDescriptorShim<T, FlavorTypeToValue<U>::value> Descriptor;
-    /**
-     * This constructor uses the external descriptor used with AIDL interfaces.
-     * It will create an FMQ based on the descriptor that was obtained from
-     * another FMQ instance for communication.
-     *
-     * @param desc Descriptor from another FMQ that contains all of the
-     * information required to create a new instance of that queue.
-     * @param resetPointers Boolean indicating whether the read/write pointers
-     * should be reset or not.
-     */
+struct AidlMessageQueue final : public AidlMessageQueueBase<T, U, BackendTypesStore> {
     AidlMessageQueue(const MQDescriptor<T, U>& desc, bool resetPointers = true);
     ~AidlMessageQueue() = default;
 
@@ -114,64 +83,24 @@ struct AidlMessageQueue final
     AidlMessageQueue(size_t numElementsInQueue, bool configureEventFlagWord,
                      android::base::unique_fd bufferFd, size_t bufferSize,
                      std::enable_if_t<std::is_same_v<V, MQErased>, size_t> quantum);
-
-    MQDescriptor<T, U> dupeDesc() const;
-
-  private:
-    AidlMessageQueue(const AidlMessageQueue& other) = delete;
-    AidlMessageQueue& operator=(const AidlMessageQueue& other) = delete;
-    AidlMessageQueue() = delete;
 };
 
 template <typename T, typename U>
 AidlMessageQueue<T, U>::AidlMessageQueue(const MQDescriptor<T, U>& desc, bool resetPointers)
-    : MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value>(Descriptor(desc),
-                                                                             resetPointers) {}
+    : AidlMessageQueueBase<T, U, BackendTypesStore>(desc, resetPointers) {}
 
 template <typename T, typename U>
 AidlMessageQueue<T, U>::AidlMessageQueue(size_t numElementsInQueue, bool configureEventFlagWord,
                                          android::base::unique_fd bufferFd, size_t bufferSize)
-    : MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value>(
-              numElementsInQueue, configureEventFlagWord, std::move(bufferFd), bufferSize) {}
+    : AidlMessageQueueBase<T, U, BackendTypesStore>(numElementsInQueue, configureEventFlagWord,
+                                                    std::move(bufferFd), bufferSize) {}
 
 template <typename T, typename U>
 template <typename V>
 AidlMessageQueue<T, U>::AidlMessageQueue(
         size_t numElementsInQueue, bool configureEventFlagWord, android::base::unique_fd bufferFd,
         size_t bufferSize, std::enable_if_t<std::is_same_v<V, MQErased>, size_t> quantum)
-    : MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value>(
-              numElementsInQueue, configureEventFlagWord, std::move(bufferFd), bufferSize,
-              quantum) {}
-
-template <typename T, typename U>
-MQDescriptor<T, U> AidlMessageQueue<T, U>::dupeDesc() const {
-    auto* shim = MessageQueueBase<AidlMQDescriptorShim, T, FlavorTypeToValue<U>::value>::getDesc();
-    if (shim) {
-        std::vector<aidl::android::hardware::common::fmq::GrantorDescriptor> grantors;
-        for (const auto& grantor : shim->grantors()) {
-            grantors.push_back(aidl::android::hardware::common::fmq::GrantorDescriptor{
-                    .fdIndex = static_cast<int32_t>(grantor.fdIndex),
-                    .offset = static_cast<int32_t>(grantor.offset),
-                    .extent = static_cast<int64_t>(grantor.extent)});
-        }
-        std::vector<ndk::ScopedFileDescriptor> fds;
-        std::vector<int> ints;
-        int data_index = 0;
-        for (; data_index < shim->handle()->numFds; data_index++) {
-            fds.push_back(ndk::ScopedFileDescriptor(dup(shim->handle()->data[data_index])));
-        }
-        for (; data_index < shim->handle()->numFds + shim->handle()->numInts; data_index++) {
-            ints.push_back(shim->handle()->data[data_index]);
-        }
-        return MQDescriptor<T, U>{
-                .grantors = grantors,
-                .handle = {std::move(fds), std::move(ints)},
-                .quantum = static_cast<int32_t>(shim->getQuantum()),
-                .flags = static_cast<int32_t>(shim->getFlags()),
-        };
-    } else {
-        return MQDescriptor<T, U>();
-    }
-}
+    : AidlMessageQueueBase<T, U, BackendTypesStore>(numElementsInQueue, configureEventFlagWord,
+                                                    std::move(bufferFd), bufferSize, quantum) {}
 
 }  // namespace android
