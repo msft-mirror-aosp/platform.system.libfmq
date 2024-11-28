@@ -23,10 +23,8 @@ using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
 using namespace android;
 
 struct MemTransaction {
-    MessageQueueBase<AidlMQDescriptorShim, MQErased,
-                     FlavorTypeToValue<SynchronizedReadWrite>::value>::MemRegion first;
-    MessageQueueBase<AidlMQDescriptorShim, MQErased,
-                     FlavorTypeToValue<SynchronizedReadWrite>::value>::MemRegion second;
+    AidlMessageQueue<MQErased, SynchronizedReadWrite>::MemRegion first;
+    AidlMessageQueue<MQErased, SynchronizedReadWrite>::MemRegion second;
 };
 
 typedef MQDescriptor<MQErased, SynchronizedReadWrite> ErasedMessageQueueDesc;
