@@ -196,7 +196,7 @@ rust_defaults {
     rustlibs: [
         "libfmq_bindgen",
         "liblog_rust",
-        "libzerocopy",
+        "libzerocopy-0.7.35",
     ],
     proc_macros: [],
 }
