@@ -17,6 +17,7 @@
 #include <android-base/logging.h>
 #include <asm-generic/mman.h>
 #include <fmq/AidlMessageQueue.h>
+#include <fmq/AidlMessageQueueCpp.h>
 #include <fmq/ConvertMQDescriptors.h>
 #include <fmq/EventFlag.h>
 #include <fmq/MessageQueue.h>
@@ -31,6 +32,9 @@
 
 using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
 using aidl::android::hardware::common::fmq::UnsynchronizedWrite;
+using cppSynchronizedReadWrite = android::hardware::common::fmq::SynchronizedReadWrite;
+using cppUnSynchronizedWrite = android::hardware::common::fmq::UnsynchronizedWrite;
+
 using android::hardware::kSynchronizedReadWrite;
 using android::hardware::kUnsynchronizedWrite;
 
@@ -41,11 +45,16 @@ enum EventFlagBits : uint32_t {
 
 typedef android::AidlMessageQueue<uint8_t, SynchronizedReadWrite> AidlMessageQueueSync;
 typedef android::AidlMessageQueue<uint8_t, UnsynchronizedWrite> AidlMessageQueueUnsync;
+typedef android::AidlMessageQueueCpp<uint8_t, cppSynchronizedReadWrite> cppAidlMessageQueueSync;
+typedef android::AidlMessageQueueCpp<uint8_t, cppUnSynchronizedWrite> cppAidlMessageQueueUnsync;
 typedef android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite> MessageQueueSync;
 typedef android::hardware::MessageQueue<uint8_t, kUnsynchronizedWrite> MessageQueueUnsync;
+
 typedef android::AidlMessageQueue<uint16_t, SynchronizedReadWrite> AidlMessageQueueSync16;
+typedef android::AidlMessageQueueCpp<uint16_t, cppSynchronizedReadWrite> cppAidlMessageQueueSync16;
 typedef android::hardware::MessageQueue<uint16_t, kSynchronizedReadWrite> MessageQueueSync16;
 typedef android::AidlMessageQueue<uint16_t, UnsynchronizedWrite> AidlMessageQueueUnsync16;
+typedef android::AidlMessageQueueCpp<uint16_t, cppUnSynchronizedWrite> cppAidlMessageQueueUnsync16;
 typedef android::hardware::MessageQueue<uint16_t, kUnsynchronizedWrite> MessageQueueUnsync16;
 
 typedef android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite> MessageQueueSync8;
@@ -53,11 +62,18 @@ typedef android::hardware::MQDescriptor<uint8_t, kSynchronizedReadWrite> HidlMQD
 typedef android::AidlMessageQueue<int8_t, SynchronizedReadWrite> AidlMessageQueueSync8;
 typedef aidl::android::hardware::common::fmq::MQDescriptor<int8_t, SynchronizedReadWrite>
         AidlMQDescSync8;
+typedef android::AidlMessageQueueCpp<int8_t, cppSynchronizedReadWrite> cppAidlMessageQueueSync8;
+typedef android::hardware::common::fmq::MQDescriptor<int8_t, cppSynchronizedReadWrite>
+        cppAidlMQDescSync8;
+
 typedef android::hardware::MessageQueue<uint8_t, kUnsynchronizedWrite> MessageQueueUnsync8;
 typedef android::hardware::MQDescriptor<uint8_t, kUnsynchronizedWrite> HidlMQDescUnsync8;
 typedef android::AidlMessageQueue<int8_t, UnsynchronizedWrite> AidlMessageQueueUnsync8;
 typedef aidl::android::hardware::common::fmq::MQDescriptor<int8_t, UnsynchronizedWrite>
         AidlMQDescUnsync8;
+typedef android::AidlMessageQueueCpp<int8_t, cppUnSynchronizedWrite> cppAidlMessageQueueUnsync8;
+typedef android::hardware::common::fmq::MQDescriptor<int8_t, cppUnSynchronizedWrite>
+        cppAidlMQDescUnsync8;
 
 enum class SetupType {
     SINGLE_FD,
@@ -73,23 +89,31 @@ class TestParamTypes {
 
 // Run everything on both the AIDL and HIDL versions with one and two FDs
 typedef ::testing::Types<TestParamTypes<AidlMessageQueueSync, SetupType::SINGLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueSync, SetupType::SINGLE_FD>,
                          TestParamTypes<MessageQueueSync, SetupType::SINGLE_FD>,
                          TestParamTypes<AidlMessageQueueSync, SetupType::DOUBLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueSync, SetupType::DOUBLE_FD>,
                          TestParamTypes<MessageQueueSync, SetupType::DOUBLE_FD>>
         SyncTypes;
 typedef ::testing::Types<TestParamTypes<AidlMessageQueueUnsync, SetupType::SINGLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueUnsync, SetupType::SINGLE_FD>,
                          TestParamTypes<MessageQueueUnsync, SetupType::SINGLE_FD>,
                          TestParamTypes<AidlMessageQueueUnsync, SetupType::DOUBLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueUnsync, SetupType::DOUBLE_FD>,
                          TestParamTypes<MessageQueueUnsync, SetupType::DOUBLE_FD>>
         UnsyncTypes;
 typedef ::testing::Types<TestParamTypes<AidlMessageQueueUnsync16, SetupType::SINGLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueUnsync16, SetupType::SINGLE_FD>,
                          TestParamTypes<MessageQueueUnsync16, SetupType::SINGLE_FD>,
                          TestParamTypes<AidlMessageQueueUnsync16, SetupType::DOUBLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueUnsync16, SetupType::DOUBLE_FD>,
                          TestParamTypes<MessageQueueUnsync16, SetupType::DOUBLE_FD>>
         TwoByteUnsyncTypes;
 typedef ::testing::Types<TestParamTypes<AidlMessageQueueSync16, SetupType::SINGLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueSync16, SetupType::SINGLE_FD>,
                          TestParamTypes<MessageQueueSync16, SetupType::SINGLE_FD>,
                          TestParamTypes<AidlMessageQueueSync16, SetupType::DOUBLE_FD>,
+                         TestParamTypes<cppAidlMessageQueueSync16, SetupType::DOUBLE_FD>,
                          TestParamTypes<MessageQueueSync16, SetupType::DOUBLE_FD>>
         BadConfigTypes;
 
