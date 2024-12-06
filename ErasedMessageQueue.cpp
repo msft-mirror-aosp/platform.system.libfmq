@@ -87,8 +87,7 @@ ErasedMessageQueue::ErasedMessageQueue(size_t numElementsInQueue, bool configure
               numElementsInQueue, configureEventFlagWord, quantum)) {}
 
 bool ErasedMessageQueue::beginWrite(size_t nMessages, MemTransaction* memTx) const {
-    MessageQueueBase<AidlMQDescriptorShim, MQErased,
-                     FlavorTypeToValue<SynchronizedReadWrite>::value>::MemTransaction memTxInternal;
+    AidlMessageQueue<MQErased, SynchronizedReadWrite>::MemTransaction memTxInternal;
     auto result = inner->beginWrite(nMessages, &memTxInternal);
     memTx->first = memTxInternal.getFirstRegion();
     memTx->second = memTxInternal.getSecondRegion();
@@ -100,8 +99,7 @@ bool ErasedMessageQueue::commitWrite(size_t nMessages) {
 }
 
 bool ErasedMessageQueue::beginRead(size_t nMessages, MemTransaction* memTx) const {
-    MessageQueueBase<AidlMQDescriptorShim, MQErased,
-                     FlavorTypeToValue<SynchronizedReadWrite>::value>::MemTransaction memTxInternal;
+    AidlMessageQueue<MQErased, SynchronizedReadWrite>::MemTransaction memTxInternal;
     auto result = inner->beginRead(nMessages, &memTxInternal);
     memTx->first = memTxInternal.getFirstRegion();
     memTx->second = memTxInternal.getSecondRegion();
