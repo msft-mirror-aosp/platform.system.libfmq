@@ -15,6 +15,7 @@
 //
 
 package {
+    default_team: "trendy_team_android_kernel",
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
@@ -93,15 +94,19 @@ cc_test {
         "libhidlbase",
         "liblog",
         "libutils",
+        "libbinder",
         "libbinder_ndk",
     ],
 
     // These are static libs only for testing purposes and portability. Shared
     // libs should be used on device.
     static_libs: [
+        "android.hardware.common-V2-cpp",
+        "android.hardware.common.fmq-V1-cpp",
         "android.hardware.common-V2-ndk",
         "android.hardware.common.fmq-V1-ndk",
         "android.hardware.tests.msgq@1.0",
+        "android.fmq.test-cpp",
         "android.fmq.test-ndk",
     ],
     whole_static_libs: [
@@ -162,6 +167,7 @@ cc_test {
     ],
     static_libs: [
         "android.hardware.common.fmq-V1-ndk",
+        "android.hardware.common.fmq-V1-cpp",
         "libfmq_rust_test",
     ],
 
