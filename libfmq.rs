@@ -22,10 +22,10 @@ use fmq_bindgen::{
     ndk_ScopedFileDescriptor, ErasedMessageQueue, ErasedMessageQueueDesc, GrantorDescriptor,
     MQDescriptor, MemTransaction, NativeHandle, ParcelFileDescriptor, SynchronizedReadWrite,
 };
+use log::error;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use std::ptr::addr_of_mut;
-
-use log::error;
 
 /// A trait indicating that a type is safe to pass through shared memory.
 ///
@@ -40,8 +40,10 @@ use log::error;
 /// the same process. As such, `Share` is a supertrait of `Sync`.
 pub unsafe trait Share: Sync {}
 
-// SAFETY: All types implementing the `zerocopy::AsBytes` trait implement `Share`.
-unsafe impl<T: zerocopy::AsBytes + zerocopy::FromBytes + Send + Sync> Share for T {}
+// SAFETY: All types implementing the zerocopy `Immutable`, `IntoBytes` and `FromBytes` traits
+// implement `Share`, because that implies that they don't have any interior mutability and can be
+// treated as just a slice of bytes.
+unsafe impl<T: Immutable + IntoBytes + FromBytes + Send + Sync> Share for T {}
 
 /// An IPC message queue for values of type T.
 pub struct MessageQueue<T> {

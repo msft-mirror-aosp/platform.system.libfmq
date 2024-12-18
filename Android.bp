@@ -189,14 +189,17 @@ rust_defaults {
     host_supported: true,
     vendor_available: true,
     product_available: true,
-    visibility: [":__subpackages__"],
+    visibility: [
+        ":__subpackages__",
+        "//system/software_defined_vehicle/core_services/sdv_comms:__subpackages__",
+    ],
     crate_name: "fmq",
     srcs: ["libfmq.rs"],
     edition: "2021",
     rustlibs: [
         "libfmq_bindgen",
         "liblog_rust",
-        "libzerocopy-0.7.35",
+        "libzerocopy",
     ],
     proc_macros: [],
 }
