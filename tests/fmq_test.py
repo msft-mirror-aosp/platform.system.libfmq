@@ -82,9 +82,11 @@ if __name__ == '__main__':
             test_name = 'test_%s_to_%s' % (short_name(client), short_name(server))
             # Tests in the C++ test client that are fully supported by the Rust test server
             rust_tests = ":".join([
-                # Only run AIDL tests 0 and 2, not HIDL tests 1 and 3
+                # Only run AIDL tests 0,1, 3 ,4, not HIDL tests 2 and 5
                 "SynchronizedReadWriteClient/0.*",
-                "SynchronizedReadWriteClient/2.*",
+                "SynchronizedReadWriteClient/1.*",
+                "SynchronizedReadWriteClient/3.*",
+                "SynchronizedReadWriteClient/4.*",
                 # Skip blocking tests until the Rust FMQ interface supports them: TODO(b/339999649)
                 "-*Blocking*",
             ])
