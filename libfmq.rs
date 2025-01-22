@@ -65,7 +65,7 @@ pub struct WriteCompletion<'a, T: Share> {
     n_written: usize,
 }
 
-impl<'a, T: Share> WriteCompletion<'a, T> {
+impl<T: Share> WriteCompletion<'_, T> {
     /// Obtain a pointer to the location at which the idx'th item should be
     /// stored.
     ///
@@ -137,7 +137,7 @@ impl<'a, T: Share> WriteCompletion<'a, T> {
     }
 }
 
-impl<'a, T: Share> Drop for WriteCompletion<'a, T> {
+impl<T: Share> Drop for WriteCompletion<'_, T> {
     fn drop(&mut self) {
         if self.n_written < self.n_elems {
             error!(
@@ -353,7 +353,7 @@ pub struct ReadCompletion<'a, T: Share> {
     n_read: usize,
 }
 
-impl<'a, T: Share> ReadCompletion<'a, T> {
+impl<T: Share> ReadCompletion<'_, T> {
     /// Obtain a pointer to the location at which the idx'th item is located.
     ///
     /// The returned pointer is only valid while `self` has not been dropped and
@@ -421,7 +421,7 @@ impl<'a, T: Share> ReadCompletion<'a, T> {
     }
 }
 
-impl<'a, T: Share> Drop for ReadCompletion<'a, T> {
+impl<T: Share> Drop for ReadCompletion<'_, T> {
     fn drop(&mut self) {
         if self.n_read < self.n_elems {
             error!(
