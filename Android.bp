@@ -192,6 +192,7 @@ rust_defaults {
     visibility: [
         ":__subpackages__",
         "//system/software_defined_vehicle/core_services/sdv_comms:__subpackages__",
+        "//vendor:__subpackages__",
     ],
     crate_name: "fmq",
     srcs: ["libfmq.rs"],
