@@ -154,15 +154,15 @@ rust_bindgen {
         "android.hardware.common.fmq-V1-rust",
         "android.hardware.common-V2-rust",
     ],
-    static_libs: [
-        "libfmq",
-    ],
     whole_static_libs: [
+        "libfmq",
         "libfmq_erased",
     ],
     shared_libs: [
         "libc++",
         "liblog",
+        "libbase",
+        "libutils",
         "android.hardware.common.fmq-V1-ndk",
     ],
     apex_available: [
