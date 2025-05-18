@@ -1488,6 +1488,95 @@ TYPED_TEST(UnsynchronizedOverflowHistoryTest, CommitReadAfterOverflow) {
 }
 
 /*
+ * In this test, we simulate a situation where, immediately after a new message is written but
+ * before commitWrite() is called (which causes an overflow), the subscriber manages to read at
+ * least one message. We must reliably detect this situation and avoid potential undetectable
+ * data corruption.
+ */
+TYPED_TEST(UnsynchronizedOverflowHistoryTest, ReadBetweenBeginWriteAndCommitWrite) {
+    // Fill a local buffer of mNumMessagesMax+1 elements and fill them with monotonic pattern
+    std::vector<uint16_t> data(this->mNumMessagesMax + 1);
+    initData(&data[0], this->mNumMessagesMax + 1);
+
+    // Write mNumMessagesMax messages from the local buffer to the FMQ buffer
+    ASSERT_TRUE(this->mQueue->write(&data[0], this->mNumMessagesMax));
+
+    // Request MemTransaction to write one more message
+    typename TypeParam::MQType::MemTransaction tx;
+    ASSERT_TRUE(this->mQueue->beginWrite(1, &tx));
+
+    // Ensure we have only one element available in MemTransaction
+    ASSERT_EQ(tx.getFirstRegion().getLength(), 1U);
+    ASSERT_EQ(tx.getSecondRegion().getLength(), 0U);
+    // Copy one element (and overwrite the first element)
+    ASSERT_TRUE(tx.copyTo(&data[this->mNumMessagesMax], 0 /* startIdx */));
+
+    // availableToRead is unaware of overflow because it knows only about committed writtes
+    ASSERT_EQ(this->mQueue->availableToRead(), this->mQueue->getQuantumCount());
+
+    // Attempt to read should fail due to ring buffer wrap around
+    uint16_t readData;
+    ASSERT_FALSE(this->mQueue->read(&readData, 1U));
+
+    // Now we should be able to read the first fully written message
+    ASSERT_TRUE(this->mQueue->read(&readData, 1U));
+    EXPECT_EQ(readData, (this->mQueue->getQuantumCount() / 2) & 0xFF);
+
+    // Commit writing
+    ASSERT_TRUE(this->mQueue->commitWrite(1));
+}
+
+/*
+ * Verify beginWrite()/commitWrite() edge cases
+ */
+TYPED_TEST(UnsynchronizedOverflowHistoryTest, ValidateBeginWriteCommitWriteBehavior) {
+    const std::vector<uint16_t> data = {0x0123, 0x4567, 0x89AB};
+    std::vector<uint16_t> readData(3);
+
+    typename TypeParam::MQType::MemTransaction tx;
+
+    // Check the normal beginWrite()/commitWrite() behavior
+    ASSERT_TRUE(this->mQueue->beginWrite(1U, &tx));
+    // Ensure we have only one element available in MemTransaction
+    ASSERT_EQ(tx.getFirstRegion().getLength(), 1U);
+    ASSERT_EQ(tx.getSecondRegion().getLength(), 0U);
+    // Copy one element (and overwrite the first element)
+    ASSERT_TRUE(tx.copyTo(&data[0], 0U /* startIdx */, 1U /* nMessages */));
+
+    ASSERT_TRUE(this->mQueue->commitWrite(1U));
+    ASSERT_EQ(this->mQueue->availableToRead(), 1U);
+
+    // Expect FALSE if invoking commitWrite() before beginWrite()
+    ASSERT_FALSE(this->mQueue->commitWrite(1U));
+
+    // Expect TRUE if invoking commitWrite() with 0 messages before beginWrite() because it's
+    // the same as we would call beginWrite(0)
+    ASSERT_TRUE(this->mQueue->commitWrite(0));
+
+    // Request MemTransaction to write 2 messages
+    ASSERT_TRUE(this->mQueue->beginWrite(2U, &tx));
+
+    // Expect FALSE if invoking commitWrite() with more messages (3) than reserved (2)
+    ASSERT_FALSE(this->mQueue->commitWrite(3U));
+
+    // Ensure we're fully recovered
+    ASSERT_EQ(this->mQueue->availableToRead(), 1U);
+
+    // Request MemTransaction to write 3 messages
+    ASSERT_TRUE(this->mQueue->beginWrite(3U, &tx));
+    // Write 2 messages
+    ASSERT_TRUE(tx.copyTo(&data[1], 0U /* startIdx */, 2U /* nMessages */));
+    // Expect TRUE if invoking commitWrite() with less messages (2) than reserved (3)
+    ASSERT_TRUE(this->mQueue->commitWrite(2U));
+    // We expect the writer pointer was advanced by 2 elements: 1+2=3
+    ASSERT_EQ(this->mQueue->availableToRead(), 3U);
+
+    // Read all 3 written messages and compare them with the source data
+    ASSERT_TRUE(this->mQueue->read(&readData[0], 3U));
+    EXPECT_EQ(data, readData);
+}
+
+/*
  * Verifies a queue of a single element will fail a read after a write overflow
  * and then recover.
  */
