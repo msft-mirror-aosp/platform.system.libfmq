@@ -487,6 +487,7 @@ struct MessageQueueBase {
     void unmapGrantorDescr(void* address, uint32_t grantorIdx);
     void initMemory(bool resetPointers);
     bool processOverflow(uint64_t readPtr, uint64_t writePtr, uint64_t writeRegionEndPtr) const;
+    void updateWriteRegionEndPtr(uint64_t numMessages, uint64_t writePtr) const;
 
     enum DefaultEventNotification : uint32_t {
         /*
@@ -1230,9 +1231,7 @@ bool MessageQueueBase<MQDescriptorType, T, flavor>::beginWrite(size_t nMessages,
     size_t writeOffset = writePtr % mDesc->getSize();
 
     if (flavor != kSynchronizedReadWrite) {
-        size_t nBytesToWrite = nMessages * quantum();
-        auto writeRegionEndPtr = writePtr + nBytesToWrite;
-        mWriteRegionEndPtr->store(writeRegionEndPtr, std::memory_order_release);
+        updateWriteRegionEndPtr(nMessages, writePtr);
     }
 
     /*
@@ -1404,6 +1403,19 @@ MessageQueueBase<MQDescriptorType, T, flavor>::processOverflow(uint64_t readPtr,
         return true;
     }
     return false;
+}
+
+template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
+/*
+ * Disable integer sanitization since integer overflow here is allowed
+ * and legal.
+ */
+__attribute__((no_sanitize("integer"))) void
+MessageQueueBase<MQDescriptorType, T, flavor>::updateWriteRegionEndPtr(uint64_t numMessages,
+                                                                       uint64_t writePtr) const {
+    size_t nBytesToWrite = numMessages * quantum();
+    auto writeRegionEndPtr = writePtr + nBytesToWrite;
+    mWriteRegionEndPtr->store(writeRegionEndPtr, std::memory_order_release);
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
