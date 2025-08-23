@@ -486,7 +486,7 @@ struct MessageQueueBase {
     void* mapGrantorDescr(uint32_t grantorIdx);
     void unmapGrantorDescr(void* address, uint32_t grantorIdx);
     void initMemory(bool resetPointers);
-    bool processOverflow(uint64_t readPtr, uint64_t writePtr) const;
+    bool processOverflow(uint64_t readPtr, uint64_t writePtr, uint64_t writeRegionEndPtr) const;
 
     enum DefaultEventNotification : uint32_t {
         /*
@@ -503,6 +503,11 @@ struct MessageQueueBase {
      */
     std::atomic<uint64_t>* mReadPtr = nullptr;
     std::atomic<uint64_t>* mWritePtr = nullptr;
+    /*
+     * mWriteRegionEndPtr is used only for Unsynchronized flavor to store a
+     * pointer to the end of the region that is currently being overwritten.
+     */
+    std::atomic<uint64_t>* mWriteRegionEndPtr = nullptr;
 
     std::atomic<uint32_t>* mEvFlagWord = nullptr;
 
@@ -681,6 +686,14 @@ void MessageQueueBase<MQDescriptorType, T, flavor>::initMemory(bool resetPointer
          * and each reader would have their own read pointer counter.
          */
         mReadPtr = new (std::nothrow) std::atomic<uint64_t>;
+
+        /*
+         * The Unsynchronized flavor uses WRITEREGIONENDPTRPOS grantor to store
+         * mWriteRegionEndPtr
+         */
+        mWriteRegionEndPtr = reinterpret_cast<std::atomic<uint64_t>*>(
+                mapGrantorDescr(hardware::details::WRITEREGIONENDPTRPOS));
+        if (mWriteRegionEndPtr == nullptr) goto error;
     }
     if (mReadPtr == nullptr) goto error;
 
@@ -691,8 +704,12 @@ void MessageQueueBase<MQDescriptorType, T, flavor>::initMemory(bool resetPointer
     if (resetPointers) {
         mReadPtr->store(0, std::memory_order_release);
         mWritePtr->store(0, std::memory_order_release);
+        // mWriteRegionEndPtr is used only for Unsynchronized flavor
+        if (flavor != kSynchronizedReadWrite) {
+            mWriteRegionEndPtr->store(0, std::memory_order_release);
+        }
     } else if (flavor != kSynchronizedReadWrite) {
-        // Always reset the read pointer.
+        // Always reset the read pointer for Unsynchronized flavor.
         mReadPtr->store(0, std::memory_order_release);
     }
 
@@ -719,6 +736,13 @@ error:
         unmapGrantorDescr(mWritePtr, hardware::details::WRITEPTRPOS);
         mWritePtr = nullptr;
     }
+
+    // The Unsynchronized flavor uses WRITEREGIONENDPTRPOS grantor to store mWriteRegionEndPtr
+    if (mWriteRegionEndPtr) {
+        unmapGrantorDescr(mWriteRegionEndPtr, hardware::details::WRITEREGIONENDPTRPOS);
+        mWriteRegionEndPtr = nullptr;
+    }
+
     if (mRing) {
         unmapGrantorDescr(mRing, hardware::details::EVFLAGWORDPOS);
         mRing = nullptr;
@@ -865,6 +889,10 @@ MessageQueueBase<MQDescriptorType, T, flavor>::~MessageQueueBase() {
     }
     if (mWritePtr != nullptr) {
         unmapGrantorDescr(mWritePtr, hardware::details::WRITEPTRPOS);
+    }
+    // The Unsynchronized flavor uses WRITEREGIONENDPTRPOS grantor to store mWriteRegionEndPtr
+    if (mWriteRegionEndPtr != nullptr) {
+        unmapGrantorDescr(mWriteRegionEndPtr, hardware::details::WRITEREGIONENDPTRPOS);
     }
     if (mRing != nullptr) {
         unmapGrantorDescr(mRing, hardware::details::DATAPTRPOS);
@@ -1175,6 +1203,17 @@ bool MessageQueueBase<MQDescriptorType, T, flavor>::beginWrite(size_t nMessages,
         return false;
     }
 
+    /*
+     * To ensure the proper functionality of an overflow that saves the last message for
+     * unsychronized flavor, it isn't recommended to allocate a region for writing with a size
+     * greater than queue_size - 1.
+     */
+    if (flavor != kSynchronizedReadWrite && nMessages == getQuantumCount()) {
+        hardware::details::logWarning(
+                "When using the unsynchronized flavor, overwriting the entire buffer in a single "
+                "call can lead to incorrect overflow handling and, as a result, data loss.");
+    }
+
     auto writePtr = mWritePtr->load(std::memory_order_relaxed);
     if (writePtr % quantum() != 0) {
         std::string errorMsg =
@@ -1189,6 +1228,12 @@ bool MessageQueueBase<MQDescriptorType, T, flavor>::beginWrite(size_t nMessages,
         return false;
     }
     size_t writeOffset = writePtr % mDesc->getSize();
+
+    if (flavor != kSynchronizedReadWrite) {
+        size_t nBytesToWrite = nMessages * quantum();
+        auto writeRegionEndPtr = writePtr + nBytesToWrite;
+        mWriteRegionEndPtr->store(writeRegionEndPtr, std::memory_order_release);
+    }
 
     /*
      * From writeOffset, the number of messages that can be written
@@ -1225,12 +1270,67 @@ __attribute__((no_sanitize("integer"))) bool
 MessageQueueBase<MQDescriptorType, T, flavor>::commitWrite(size_t nMessages) {
     size_t nBytesWritten = nMessages * quantum();
     auto writePtr = mWritePtr->load(std::memory_order_relaxed);
+
+    /*
+     * Ensure we handle all the edge cases properly while moving writePtr
+     */
+    if (flavor != kSynchronizedReadWrite) {
+        auto writeRegionEndPtr = mWriteRegionEndPtr->load(std::memory_order_relaxed);
+        if (writeRegionEndPtr) {
+            if (writeRegionEndPtr < writePtr) {
+                std::string errorMsg =
+                        "The write or write_region_end pointer has become corrupted. Reading from "
+                        "the queue is no longer possible. Write pointer: " +
+                        std::to_string(writePtr) +
+                        ", write_region_end pointer: " + std::to_string(writeRegionEndPtr);
+                hardware::details::logError(errorMsg);
+                if (mErrorHandler) {
+                    mErrorHandler(Error::POINTER_CORRUPTION, std::move(errorMsg));
+                }
+                return false;
+            } else if (writeRegionEndPtr == writePtr) {
+                if (nMessages) {
+                    /*
+                     * beginWrite was either called with a reservation for 0 messages, or it wasn't
+                     * called at all. In this case, we have a potential error.
+                     * In this case we don't move the writePtr and return false.
+                     */
+                    hardware::details::logError("commitWrite(" + std::to_string(nMessages) +
+                                                ") failed because a region for writing was not "
+                                                "reserved with beginWrite().");
+                    return false;
+                } else {
+                    /* Writing 0 messages. In this case, we don't need to move the writePtr. */
+                    return true;
+                }
+            }
+
+            auto reservedToWrite = writeRegionEndPtr - writePtr;
+            if (nBytesWritten > reservedToWrite) {
+                /*
+                 * We're trying to commitWrite() more messages than were reserved. In this
+                 * situation, we return an error because the probability of data corruption is
+                 * very high. Resetting the writeRegionEndPtr to writePtr.
+                 */
+                mWriteRegionEndPtr->store(writePtr, std::memory_order_release);
+                hardware::details::logError("Attempt to commitWrite(" +
+                                            std::to_string(nBytesWritten) +
+                                            " bytes), but was reserved less with beginWrite(" +
+                                            std::to_string(reservedToWrite) + " bytes).");
+                return false;
+            } else if (nBytesWritten < reservedToWrite) {
+                /*
+                 * In this case, we're trying to commitWrite() less data than was reserved. This
+                 * is not an error; we simply adjust the writeRegionEndPtr back.
+                 */
+                writeRegionEndPtr = writePtr + nBytesWritten;
+                mWriteRegionEndPtr->store(writeRegionEndPtr, std::memory_order_release);
+            }
+        }
+    }
+
     writePtr += nBytesWritten;
     mWritePtr->store(writePtr, std::memory_order_release);
-    /*
-     * This method cannot fail now since we are only incrementing the writePtr
-     * counter.
-     */
     return true;
 }
 
@@ -1270,17 +1370,37 @@ template <template <typename, MQFlavor> typename MQDescriptorType, typename T, M
  * and legal.
  */
 __attribute__((no_sanitize("integer"))) bool
-MessageQueueBase<MQDescriptorType, T, flavor>::processOverflow(uint64_t readPtr,
-                                                               uint64_t writePtr) const {
-    if (writePtr - readPtr > mDesc->getSize()) {
-        /*
-         * Preserved history can be as big as mDesc->getSize() but we expose only half of that.
-         * Half of the buffer will be discarded to make space for fast writers and
-         * reduce chance of repeated overflows. The other half is available to read.
-         */
-        size_t historyOffset = getQuantumCount() / 2 * getQuantumSize();
-        mReadPtr->store(writePtr - historyOffset, std::memory_order_release);
-        hardware::details::logError("Read failed after an overflow. Resetting read pointer.");
+MessageQueueBase<MQDescriptorType, T, flavor>::processOverflow(uint64_t readPtr, uint64_t writePtr,
+                                                               uint64_t writeRegionEndPtr) const {
+    // Ensure the writeRegionEndPtr is initialized and it isn't behind writePtr
+    writeRegionEndPtr = std::max(writeRegionEndPtr, writePtr);
+
+    if (writeRegionEndPtr < readPtr) {
+        std::string errorMsg =
+                "The write_region_end or read pointer has become corrupted. Reading from the queue "
+                "is no longer possible. Write region end pointer: " +
+                std::to_string(writeRegionEndPtr) + ", read pointer: " + std::to_string(readPtr);
+        hardware::details::logError(errorMsg);
+        if (mErrorHandler) {
+            mErrorHandler(Error::POINTER_CORRUPTION, std::move(errorMsg));
+        }
+        return true;
+    }
+
+    if (writeRegionEndPtr - readPtr > mDesc->getSize()) {
+        // In case of an overflow, we attempt to save 'getQuantumCount()/2' messages.
+        size_t wantToSave = getQuantumCount() / 2 * getQuantumSize();
+        size_t availableToSave = mDesc->getSize() - (writeRegionEndPtr - writePtr);
+        if (wantToSave > availableToSave) {
+            // If that is not possible, we reset 'readPtr' to the value of 'writePtr'.
+            wantToSave = 0;
+        }
+        hardware::details::logDebug(
+                std::format("Read failed after an overflow. Resetting read pointer with preserving "
+                            "{} messages.",
+                            wantToSave / getQuantumSize()));
+        mReadPtr->store(writePtr - wantToSave, std::memory_order_release);
+
         return true;
     }
     return false;
@@ -1316,8 +1436,17 @@ MessageQueueBase<MQDescriptorType, T, flavor>::beginRead(size_t nMessages,
         return false;
     }
 
-    if (processOverflow(readPtr, writePtr)) {
-        return false;
+    if (flavor != kSynchronizedReadWrite) {
+        /*
+         *  TODO(b/437364964): The C++ standard describes the ordering of std::atomic operations
+         *  in detail, but there are no clear guarantees when they are combined with operations
+         *  like memcpy(). Nevertheless, our stress tests have not revealed any issues on x86_64
+         *  and Arm64 (Raspberry Pi 4).
+         */
+        auto writeRegionEndPtr = mWriteRegionEndPtr->load(std::memory_order_acquire);
+        if (processOverflow(readPtr, writePtr, writeRegionEndPtr)) {
+            return false;
+        }
     }
 
     size_t nBytesDesired = nMessages * quantum();
@@ -1370,8 +1499,11 @@ MessageQueueBase<MQDescriptorType, T, flavor>::commitRead(size_t nMessages) {
      * If the flavor is unsynchronized, it is possible that a write overflow may
      * have occurred between beginRead() and commitRead().
      */
-    if (processOverflow(readPtr, writePtr)) {
-        return false;
+    if (flavor != kSynchronizedReadWrite) {
+        auto writeRegionEndPtr = mWriteRegionEndPtr->load(std::memory_order_acquire);
+        if (processOverflow(readPtr, writePtr, writeRegionEndPtr)) {
+            return false;
+        }
     }
 
     size_t nBytesRead = nMessages * quantum();

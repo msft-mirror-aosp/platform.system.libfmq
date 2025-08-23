@@ -34,6 +34,14 @@ void logError(const std::string &message) {
     LOG(ERROR) << message;
 }
 
+void logWarning(const std::string& message) {
+    LOG(WARNING) << message;
+}
+
+void logDebug(const std::string& message) {
+    LOG(DEBUG) << message;
+}
+
 void errorWriteLog(int tag, const char* info) {
     android_errorWriteLog(tag, info);
 }
