@@ -1394,10 +1394,10 @@ MessageQueueBase<MQDescriptorType, T, flavor>::processOverflow(uint64_t readPtr,
             // If that is not possible, we reset 'readPtr' to the value of 'writePtr'.
             wantToSave = 0;
         }
-        hardware::details::logDebug(
-                std::format("Read failed after an overflow. Resetting read pointer with preserving "
-                            "{} messages.",
-                            wantToSave / getQuantumSize()));
+        std::string debugMsg =
+                "Read failed after an overflow. Resetting read pointer with preserving " +
+                std::to_string(wantToSave / getQuantumSize()) + " messages.";
+        hardware::details::logDebug(debugMsg);
         mReadPtr->store(writePtr - wantToSave, std::memory_order_release);
 
         return true;
