@@ -126,6 +126,24 @@ class ErasedMessageQueue {
     bool commitWrite(size_t nMessages);
 
     /**
+     * Perform a blocking write of `count` items into the FMQ using EventFlags.
+     * Does not support partial writes.
+     *
+     * The method will return false without blocking if any of the following
+     * conditions are true:
+     * - If the FMQ does not own an EventFlag object.
+     * - If `count` is greater than the FMQ size.
+     *
+     * @param data Pointer to the array of items of the element type.
+     * @param count Number of items in array.
+     * @param timeOutNanos Number of nanoseconds after which the blocking
+     * write attempt is aborted.
+     *
+     * @return Whether the write was successful.
+     */
+    bool writeBlocking(const void* data, size_t count, int64_t timeOutNanos);
+
+    /**
      * Get a MemTransaction object to read `nMessages` elements.
      * Once the read is performed using the information from MemTransaction,
      * the read operation is to be committed using a call to `commitRead()`.
@@ -150,6 +168,34 @@ class ErasedMessageQueue {
      * @return bool Whether the read operation of size `nMessages` succeeded.
      */
     bool commitRead(size_t nMessages);
+
+    /**
+     * Perform a blocking read operation of `count` items from the FMQ. Does not
+     * perform a partial read.
+     *
+     * The method will return false without blocking if any of the following
+     * conditions are true:
+     * -If the FMQ does not own an EventFlag object.
+     * -If `count` is greater than the FMQ size.
+     *
+     * @param data Pointer to the array to which read data is to be written.
+     * @param count Number of items to be read.
+     * @param timeOutNanos Number of nanoseconds after which the blocking
+     * read attempt is aborted.
+     *
+     * @return Whether the read was successful.
+     */
+    bool readBlocking(void* data, size_t count, int64_t timeOutNanos);
+
+    /**
+     * Get a pointer to the EventFlag word if the FMQ has one.
+     *
+     * @return Pointer to an EventFlag word, or nullptr if an EventFlag word was
+     * not requested when the FMQ was created. This method does not transfer
+     * ownership; the EventFlag word remains owned by the FMQ and will be freed
+     * when the FMQ is destroyed.
+     */
+    uint32_t* getEventFlagWord() const;
 
     /**
      * Create a copy of the MQDescriptor for this object. This descriptor can be
