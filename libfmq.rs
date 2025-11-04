@@ -332,11 +332,18 @@ fn ptr<T: Share>(txn: &MemTransaction, idx: usize) -> *mut T {
 
 #[inline(always)]
 fn contiguous_count(txn: &MemTransaction, idx: usize, n_elems: usize) -> usize {
-    if idx > n_elems {
+    if idx >= n_elems {
         return 0;
     }
-    let region_len = if idx < txn.first.length { txn.first.length } else { txn.second.length };
-    region_len - idx
+
+    if idx < txn.first.length {
+        // In first region
+        txn.first.length - idx
+    } else {
+        // In second region
+        let idx_in_second_region = idx - txn.first.length;
+        txn.second.length - idx_in_second_region
+    }
 }
 
 /** A read completion from the MessageQueue::read() method.
@@ -490,5 +497,49 @@ mod test {
             slice_from_raw_parts_or_empty(ptr, len)
         };
         assert_eq!(&[] as &[u8], empty_from_raw_parts);
+    }
+
+    #[test]
+    fn contiguous_count_index_out_of_bounds_returns_zero() {
+        let mut txn: MemTransaction = Default::default();
+        txn.first.length = 10;
+        txn.second.length = 5;
+        let n_elems = txn.first.length + txn.second.length;
+
+        assert_eq!(contiguous_count(&txn, n_elems + 1, n_elems), 0);
+        assert_eq!(contiguous_count(&txn, n_elems, n_elems), 0);
+    }
+
+    #[test]
+    fn contiguous_count_index_in_first_region_returns_correct_count() {
+        let mut txn: MemTransaction = Default::default();
+        txn.first.length = 10;
+        txn.second.length = 5;
+        let n_elems = txn.first.length + txn.second.length;
+
+        assert_eq!(contiguous_count(&txn, 0, n_elems), 10);
+        assert_eq!(contiguous_count(&txn, 5, n_elems), 5);
+        assert_eq!(contiguous_count(&txn, 9, n_elems), 1);
+    }
+
+    #[test]
+    fn contiguous_count_index_at_first_region_boundary_returns_second_region_length() {
+        let mut txn: MemTransaction = Default::default();
+        txn.first.length = 10;
+        txn.second.length = 5;
+        let n_elems = txn.first.length + txn.second.length;
+
+        assert_eq!(contiguous_count(&txn, 10, n_elems), 5);
+    }
+
+    #[test]
+    fn contiguous_count_index_in_second_region_returns_correct_count() {
+        let mut txn: MemTransaction = Default::default();
+        txn.first.length = 10;
+        txn.second.length = 5;
+        let n_elems = txn.first.length + txn.second.length;
+
+        assert_eq!(contiguous_count(&txn, 11, n_elems), 4);
+        assert_eq!(contiguous_count(&txn, 14, n_elems), 1);
     }
 }
