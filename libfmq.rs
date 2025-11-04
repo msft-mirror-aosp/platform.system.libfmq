@@ -132,7 +132,7 @@ impl<T: Share> WriteCompletion<'_, T> {
     /// It is UB to call this method except after calling the `ptr` method and
     /// writing the specified number of values of type T to that location.
     pub unsafe fn assume_written(&mut self, n_newly_written: usize) {
-        assert!(n_newly_written < self.required_elements());
+        assert!(n_newly_written <= self.required_elements());
         self.n_written += n_newly_written;
     }
 }
@@ -423,7 +423,7 @@ impl<T: Share> ReadCompletion<'_, T> {
     /// Calling this method without actually reading the elements will result
     /// in them being leaked without destructors (if any) running.
     pub fn assume_read(&mut self, n_newly_read: usize) {
-        assert!(n_newly_read < self.unread_elements());
+        assert!(n_newly_read <= self.unread_elements());
         self.n_read += n_newly_read;
     }
 }
