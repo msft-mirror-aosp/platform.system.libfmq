@@ -27,6 +27,7 @@ rust_library {
         "android.fmq.test-rust",
         "android.hardware.common.fmq-V1-rust",
         "libfmq_rust",
+        "libzerocopy",
     ],
     shared_libs: [
         "libbase",

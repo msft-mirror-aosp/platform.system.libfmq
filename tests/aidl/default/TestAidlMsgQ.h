@@ -39,10 +39,24 @@ using ::android::hardware::MQFlavor;
 using ::android::AidlMessageQueue;
 
 struct TestAidlMsgQ : public BnTestAidlMsgQ {
-    typedef AidlMessageQueue<int32_t, SynchronizedReadWrite> MessageQueueSync;
-    typedef AidlMessageQueue<int32_t, UnsynchronizedWrite> MessageQueueUnsync;
+    using ::aidl::android::fmq::test::ITestAidlMsgQ::EnumPayload;
+    using ::aidl::android::fmq::test::ITestAidlMsgQ::StructPayload;
+    using ::aidl::android::fmq::test::ITestAidlMsgQ::UnionPayload;
 
-    TestAidlMsgQ() : mFmqSynchronized(nullptr), mFmqUnsynchronized(nullptr) {}
+    template <typename T>
+    using MessageQueueSync = AidlMessageQueue<T, SynchronizedReadWrite>;
+    template <typename T>
+    using MessageQueueUnsync = AidlMessageQueue<T, UnsynchronizedWrite>;
+
+    TestAidlMsgQ()
+        : mFmqSynchronized(nullptr),
+          mFmqSynchronizedStruct(nullptr),
+          mFmqSynchronizedUnion(nullptr),
+          mFmqSynchronizedEnum(nullptr),
+          mFmqUnsynchronized(nullptr),
+          mFmqUnsynchronizedStruct(nullptr),
+          mFmqUnsynchronizedUnion(nullptr),
+          mFmqUnsynchronizedEnum(nullptr) {}
 
     // Methods from ::aidl::android::fmq::test::ITestAidlMsgQ follow.
     ndk::ScopedAStatus configureFmqSyncReadWrite(
@@ -51,6 +65,18 @@ struct TestAidlMsgQ : public BnTestAidlMsgQ {
     ndk::ScopedAStatus getFmqUnsyncWrite(bool configureFmq, bool userFd,
                                          MQDescriptor<int32_t, UnsynchronizedWrite>* mqDesc,
                                          bool* _aidl_return) override;
+    ndk::ScopedAStatus configureFmqAidlTypesSyncReadWrite(
+            const std::optional<MQDescriptor<StructPayload, SynchronizedReadWrite>>&
+                    in_mqDescStruct,
+            const std::optional<MQDescriptor<UnionPayload, SynchronizedReadWrite>>& in_mqDescUnion,
+            const std::optional<MQDescriptor<EnumPayload, SynchronizedReadWrite>>& in_mqDescEnum,
+            bool* _aidl_return) override;
+    ndk::ScopedAStatus getFmqAidlTypesUnsyncWrite(
+            bool in_configureFmq, bool in_userFd,
+            std::optional<MQDescriptor<StructPayload, UnsynchronizedWrite>>* out_mqDescStruct,
+            std::optional<MQDescriptor<UnionPayload, UnsynchronizedWrite>>* out_mqDescUnion,
+            std::optional<MQDescriptor<EnumPayload, UnsynchronizedWrite>>* out_mqDescEnum,
+            bool* _aidl_return) override;
     ndk::ScopedAStatus requestBlockingRead(int32_t count) override;
     ndk::ScopedAStatus requestBlockingReadDefaultEventFlagBits(int32_t count) override;
     ndk::ScopedAStatus requestBlockingReadRepeat(int32_t count, int32_t numIter) override;
@@ -60,8 +86,14 @@ struct TestAidlMsgQ : public BnTestAidlMsgQ {
     ndk::ScopedAStatus requestWriteFmqUnsync(int32_t count, bool* _aidl_return) override;
 
   private:
-    std::unique_ptr<MessageQueueSync> mFmqSynchronized;
-    std::unique_ptr<MessageQueueUnsync> mFmqUnsynchronized;
+    std::unique_ptr<MessageQueueSync<int32_t>> mFmqSynchronized;
+    std::unique_ptr<MessageQueueSync<StructPayload>> mFmqSynchronizedStruct;
+    std::unique_ptr<MessageQueueSync<UnionPayload>> mFmqSynchronizedUnion;
+    std::unique_ptr<MessageQueueSync<EnumPayload>> mFmqSynchronizedEnum;
+    std::unique_ptr<MessageQueueUnsync<int32_t>> mFmqUnsynchronized;
+    std::unique_ptr<MessageQueueUnsync<StructPayload>> mFmqUnsynchronizedStruct;
+    std::unique_ptr<MessageQueueUnsync<UnionPayload>> mFmqUnsynchronizedUnion;
+    std::unique_ptr<MessageQueueUnsync<EnumPayload>> mFmqUnsynchronizedEnum;
 
     /*
      * Utility function to verify data read from the fast message queue.
@@ -72,6 +104,8 @@ struct TestAidlMsgQ : public BnTestAidlMsgQ {
         }
         return true;
     }
+
+    // TODO: implement verifyData analogue for types other than int32_t
 };
 
 }  // namespace test

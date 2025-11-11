@@ -215,6 +215,7 @@ rust_defaults {
     srcs: ["libfmq.rs"],
     edition: "2021",
     rustlibs: [
+        "libbinder_rs",
         "libfmq_bindgen",
         "liblog_rust",
         "libzerocopy",
