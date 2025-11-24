@@ -1441,10 +1441,14 @@ MessageQueueBase<MQDescriptorType, T, flavor>::beginRead(size_t nMessages,
      */
     auto readPtr = mReadPtr->load(std::memory_order_relaxed);
     if (writePtr % quantum() != 0 || readPtr % quantum() != 0) {
-        hardware::details::logError(
+        std::string errorMsg =
                 "The write or read pointer has become misaligned. Reading from the queue is no "
-                "longer possible.");
+                "longer possible.";
+        hardware::details::logError(errorMsg);
         hardware::details::errorWriteLog(0x534e4554, "184963385");
+        if (mErrorHandler) {
+            mErrorHandler(Error::POINTER_CORRUPTION, std::move(errorMsg));
+        }
         return false;
     }
 

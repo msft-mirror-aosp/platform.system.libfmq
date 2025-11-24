@@ -27,7 +27,9 @@
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <sstream>
+#include <string>
 #include <thread>
 
 using aidl::android::hardware::common::fmq::SynchronizedReadWrite;
@@ -700,6 +702,89 @@ TEST_F(DoubleFdFailures, LargerFdSize) {
     AidlMessageQueueSync16 fmq = AidlMessageQueueSync16(
             kNumElementsInQueue, false, std::move(ringbufferFd), kRequiredDataBufferSize + 8);
     EXPECT_TRUE(fmq.isValid());
+}
+
+class PointerCorruptionTest : public ::testing::Test {
+  public:
+    typename android::MessageQueueBase<android::hardware::MQDescriptor, uint16_t,
+                                       kSynchronizedReadWrite>::Error mErrorType;
+    std::string mErrorMessage;
+
+    void SetUp() override {
+        mErrorMessage = "";
+        mErrorType = android::MessageQueueBase<android::hardware::MQDescriptor, uint16_t,
+                                               kSynchronizedReadWrite>::Error::NONE;
+    }
+
+    void errorHandler(typename android::MessageQueueBase<android::hardware::MQDescriptor, uint16_t,
+                                                         kSynchronizedReadWrite>::Error errorType,
+                      std::string errorMessage) {
+        mErrorType = errorType;
+        mErrorMessage = errorMessage;
+    }
+};
+
+TEST_F(PointerCorruptionTest, NoMisalignedReadPointer) {
+    size_t numElementsInQueue = 64;
+    size_t payloadSizeBytes = sizeof(uint16_t);
+
+    // Create the MessageQueue
+    android::hardware::MessageQueue<uint16_t, kSynchronizedReadWrite> fmq(numElementsInQueue);
+    ASSERT_TRUE(fmq.isValid());
+
+    // Set the custom error handler
+    fmq.setErrorHandler(std::bind(&PointerCorruptionTest::errorHandler, this, std::placeholders::_1,
+                                  std::placeholders::_2));
+
+    // Attempt to read (should fail because queue is empty, but not trigger error handler)
+    uint16_t data;
+    ASSERT_FALSE(fmq.read(&data, 1));
+
+    // Verify the error handler was NOT called
+    ASSERT_EQ(mErrorType, (android::MessageQueueBase<android::hardware::MQDescriptor, uint16_t,
+                                                     kSynchronizedReadWrite>::Error::NONE));
+    ASSERT_EQ(mErrorMessage, "");
+}
+
+TEST_F(PointerCorruptionTest, MisalignedReadPointerViaTypePunning) {
+    size_t numElementsInQueue = 64;
+    // Create a byte queue (uint8_t)
+    android::hardware::MessageQueue<uint8_t, kSynchronizedReadWrite> fmqByte(numElementsInQueue *
+                                                                             sizeof(uint16_t));
+    ASSERT_TRUE(fmqByte.isValid());
+
+    // Write 1 byte to misalign the pointer for uint16_t (quantum 2)
+    uint8_t data = 0xAA;
+    ASSERT_TRUE(fmqByte.write(&data, 1));
+
+    // Get the descriptor from fmqByte
+    const auto* byteDesc = fmqByte.getDesc();
+    ASSERT_NE(nullptr, byteDesc);
+
+    // Create a new descriptor for uint16_t with the same handle but quantum 2
+    native_handle_t* handle = native_handle_clone(byteDesc->handle());
+    android::hardware::MQDescriptor<uint16_t, kSynchronizedReadWrite> shortDesc(
+            byteDesc->grantors(), handle, sizeof(uint16_t));
+
+    // Create the short queue (uint16_t) sharing the memory, without resetting pointers
+    android::hardware::MessageQueue<uint16_t, kSynchronizedReadWrite> fmqShort(
+            shortDesc, false /* resetPointers */);
+    ASSERT_TRUE(fmqShort.isValid());
+
+    // Set the custom error handler
+    fmqShort.setErrorHandler(std::bind(&PointerCorruptionTest::errorHandler, this,
+                                       std::placeholders::_1, std::placeholders::_2));
+
+    // Attempt to read to trigger the error handler
+    uint16_t readData;
+    fmqShort.read(&readData, 1);
+
+    // Verify the error handler was called with the correct error type and message
+    ASSERT_EQ(mErrorType,
+              (android::MessageQueueBase<android::hardware::MQDescriptor, uint16_t,
+                                         kSynchronizedReadWrite>::Error::POINTER_CORRUPTION));
+    ASSERT_NE(mErrorMessage.find("The write or read pointer has become misaligned."),
+              std::string::npos);
 }
 
 /*
