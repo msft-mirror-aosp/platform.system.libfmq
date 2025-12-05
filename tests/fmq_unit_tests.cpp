@@ -1205,6 +1205,63 @@ TYPED_TEST(SynchronizedReadWrites, ReadWriteWrapAround2) {
     ASSERT_EQ(data, readData);
 }
 
+TYPED_TEST(SynchronizedReadWrites, ReadLatestEmpty) {
+    uint8_t data;
+    ASSERT_EQ(0, this->mQueue->readLatest(&data));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(SynchronizedReadWrites, ReadLatestSingle) {
+    uint8_t wData = 123;
+    ASSERT_TRUE(this->mQueue->write(&wData));
+
+    uint8_t rData = 0;
+    ASSERT_EQ(1, this->mQueue->readLatest(&rData));
+    ASSERT_EQ(wData, rData);
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(SynchronizedReadWrites, ReadLatestMultiple) {
+    const size_t numMessages = 10;
+    uint8_t wData[numMessages];
+    initData(wData, numMessages);
+
+    ASSERT_TRUE(this->mQueue->write(wData, numMessages));
+
+    uint8_t rData = 0;
+    ASSERT_EQ(1, this->mQueue->readLatest(&rData));
+    ASSERT_EQ(wData[numMessages - 1], rData);
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(SynchronizedReadWrites, ReadLatestMultipleCount) {
+    const size_t numMessages = 20;
+    uint8_t wData[numMessages];
+    initData(wData, numMessages);
+
+    ASSERT_TRUE(this->mQueue->write(wData, numMessages));
+
+    const size_t readCount = 5;
+    uint8_t rData[readCount];
+    ASSERT_EQ(readCount, this->mQueue->readLatest(rData, readCount));
+    ASSERT_EQ(0, memcmp(rData, &wData[numMessages - readCount], readCount));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(SynchronizedReadWrites, ReadLatestMoreThanAvailable) {
+    const size_t numMessages = 10;
+    uint8_t wData[numMessages];
+    initData(wData, numMessages);
+
+    ASSERT_TRUE(this->mQueue->write(wData, numMessages));
+
+    const size_t readCount = 15;
+    uint8_t rData[readCount];
+    ASSERT_EQ(numMessages, this->mQueue->readLatest(rData, readCount));
+    ASSERT_EQ(0, memcmp(rData, wData, numMessages));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
 /*
  * Verify that a few bytes of data can be successfully written and read.
  */
@@ -1374,6 +1431,81 @@ TYPED_TEST(UnsynchronizedReadWriteTest, ReadWriteWrapAround) {
     ASSERT_EQ(data, readData);
 }
 
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestEmpty) {
+    uint8_t data;
+    ASSERT_EQ(0, this->mQueue->readLatest(&data));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestSingle) {
+    uint8_t wData = 123;
+    ASSERT_TRUE(this->mQueue->write(&wData));
+
+    uint8_t rData = 0;
+    ASSERT_EQ(1, this->mQueue->readLatest(&rData));
+    ASSERT_EQ(wData, rData);
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestMultiple) {
+    const size_t numMessages = 10;
+    uint8_t wData[numMessages];
+    initData(wData, numMessages);
+
+    ASSERT_TRUE(this->mQueue->write(wData, numMessages));
+
+    uint8_t rData = 0;
+    ASSERT_EQ(1, this->mQueue->readLatest(&rData));
+    ASSERT_EQ(wData[numMessages - 1], rData);
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestMultipleCount) {
+    const size_t numMessages = 20;
+    uint8_t wData[numMessages];
+    initData(wData, numMessages);
+
+    ASSERT_TRUE(this->mQueue->write(wData, numMessages));
+
+    const size_t readCount = 5;
+    uint8_t rData[readCount];
+    ASSERT_EQ(readCount, this->mQueue->readLatest(rData, readCount));
+    ASSERT_EQ(0, memcmp(rData, &wData[numMessages - readCount], readCount));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestMoreThanAvailable) {
+    const size_t numMessages = 10;
+    uint8_t wData[numMessages];
+    initData(wData, numMessages);
+
+    ASSERT_TRUE(this->mQueue->write(wData, numMessages));
+
+    const size_t readCount = 15;
+    uint8_t rData[readCount];
+    ASSERT_EQ(numMessages, this->mQueue->readLatest(rData, readCount));
+    ASSERT_EQ(0, memcmp(rData, wData, numMessages));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestAfterOverflow) {
+    // Fill the queue and cause an overflow
+    std::vector<uint8_t> data(this->mNumMessagesMax);
+    initData(data.data(), data.size());
+    ASSERT_TRUE(this->mQueue->write(data.data(), data.size()));
+    ASSERT_TRUE(this->mQueue->write(data.data(), 1));
+
+    // After an overflow, a normal read would fail.
+    uint8_t temp;
+    ASSERT_FALSE(this->mQueue->read(&temp, 1));
+
+    // readLatest should still work and recover the queue state.
+    uint8_t rData;
+    ASSERT_EQ(1, this->mQueue->readLatest(&rData));
+    ASSERT_EQ(data[0], rData);
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
 /*
  * Attempt to read more than the maximum number of messages in the queue.
  */
@@ -1401,6 +1533,42 @@ TYPED_TEST(UnsynchronizedReadWriteTest, ReadMoreThanAvailableToReadFails) {
     // Attempt to read more than the available data.
     std::vector<uint8_t> readData(dataLen + 1);
     ASSERT_FALSE(this->mQueue->read(readData.data(), readData.size()));
+}
+
+/*
+ * Verify that readLatest() reads all available messages when asked for more
+ * than the queue capacity.
+ */
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestMoreThanNumMessagesMax) {
+    // Fill the queue with data
+    std::vector<uint8_t> data(this->mNumMessagesMax);
+    initData(data.data(), data.size());
+    ASSERT_TRUE(this->mQueue->write(data.data(), data.size()));
+
+    // Attempt to read more than the maximum number of messages in the queue.
+    std::vector<uint8_t> readData(this->mNumMessagesMax + 1);
+    ASSERT_EQ(this->mNumMessagesMax,
+              this->mQueue->readLatest(readData.data(), readData.size()));
+    ASSERT_EQ(0, memcmp(data.data(), readData.data(), this->mNumMessagesMax));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
+}
+
+/*
+ * Verify that readLatest() reads all available messages when asked for more
+ * than is available.
+ */
+TYPED_TEST(UnsynchronizedReadWriteTest, ReadLatestMoreThanAvailableToRead) {
+    // Fill half of the queue with data.
+    size_t dataLen = this->mNumMessagesMax / 2;
+    std::vector<uint8_t> data(dataLen);
+    initData(data.data(), data.size());
+    ASSERT_TRUE(this->mQueue->write(data.data(), data.size()));
+
+    // Attempt to read more than the available data.
+    std::vector<uint8_t> readData(dataLen + 1);
+    ASSERT_EQ(dataLen, this->mQueue->readLatest(readData.data(), readData.size()));
+    ASSERT_EQ(0, memcmp(data.data(), readData.data(), dataLen));
+    ASSERT_EQ(0, this->mQueue->availableToRead());
 }
 
 /*

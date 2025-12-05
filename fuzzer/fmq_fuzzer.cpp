@@ -19,6 +19,8 @@
 #include <iostream>
 #include <limits>
 #include <thread>
+#include <type_traits>
+#include <vector>
 
 #include <android-base/logging.h>
 #include <android-base/scopeguard.h>
@@ -126,6 +128,17 @@ void reader(const Desc& desc, std::vector<uint8_t> readerData, bool userFd) {
     FuzzedDataProvider fdp(&readerData[0], readerData.size());
     payload_t* ring = reinterpret_cast<payload_t*>(readMq.getRingBufferPtr());
     while (fdp.remaining_bytes()) {
+        if constexpr (std::is_same_v<Queue, MessageQueueSync>) {
+            if (fdp.ConsumeBool()) {
+                payload_t data;
+                readMq.readLatest(&data);
+            }
+            if (fdp.ConsumeBool()) {
+                size_t numMessages = fdp.ConsumeIntegralInRange<size_t>(1, kMaxNumElements);
+                std::vector<payload_t> data(numMessages);
+                readMq.readLatest(data.data(), numMessages);
+            }
+        }
         typename Queue::MemTransaction tx;
         size_t numElements = fdp.ConsumeIntegralInRange<size_t>(0, kMaxNumElements);
         if (!readMq.beginRead(numElements, &tx)) {
@@ -161,6 +174,17 @@ void readerBlocking(const Desc& desc, std::vector<uint8_t>& readerData,
     }
     FuzzedDataProvider fdp(&readerData[0], readerData.size());
     do {
+        if constexpr (std::is_same_v<Queue, MessageQueueSync>) {
+            if (fdp.ConsumeBool()) {
+                payload_t data;
+                readMq.readLatest(&data);
+            }
+            if (fdp.ConsumeBool()) {
+                size_t numMessages = fdp.ConsumeIntegralInRange<size_t>(1, kMaxNumElements);
+                std::vector<payload_t> data(numMessages);
+                readMq.readLatest(data.data(), numMessages);
+            }
+        }
         size_t count = fdp.remaining_bytes()
                                ? fdp.ConsumeIntegralInRange<size_t>(0, readMq.getQuantumCount() + 1)
                                : 1;
