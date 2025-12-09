@@ -208,6 +208,34 @@ struct MessageQueueBase {
     bool read(T* data, size_t count);
 
     /**
+     * Read the single latest data from the FMQ without blocking.
+     * For the unsynchronized flavor, this method can recover from a queue overflow
+     * that would cause a normal read() to fail.
+     * Note: This discards all previous data because the read pointer is set to
+     *  the end of the latest data that was read.
+     *
+     * @param data Pointer to the memory where the latest message is to be written.
+     *
+     * @return 1 if a message was read, or 0 if the queue was empty or an error occurred.
+     */
+    size_t readLatest(T* data);
+
+    /**
+     * Read up to nMessages of the latest data from the FMQ without blocking.
+     * For the unsynchronized flavor, this method can recover from a queue overflow
+     * that would cause a normal read() to fail.
+     * Note: This discards all previous data because the read pointer is set to
+     *  the end of the latest data that was read.
+     *
+     * @param data Pointer to the array to which the latest messages are to be written.
+     * @param nMessages The maximum number of items to read.
+     *
+     * @return The number of messages actually read, or 0 if the queue was empty
+     * or an error occurred.
+     */
+    size_t readLatest(T* data, size_t nMessages);
+
+    /**
      * Perform a blocking read operation of 'count' items from the FMQ. Does not
      * perform a partial read.
      *
@@ -1361,6 +1389,58 @@ bool MessageQueueBase<MQDescriptorType, T, flavor>::read(T* data, size_t nMessag
     MemTransaction tx;
     return beginRead(nMessages, &tx) &&
            tx.copyFromSized(data, 0 /* startIdx */, nMessages, quantum()) && commitRead(nMessages);
+}
+
+template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
+/*
+ * Disable integer sanitization since integer overflow here is allowed
+ * and legal.
+ */
+__attribute__((no_sanitize("integer"))) size_t
+MessageQueueBase<MQDescriptorType, T, flavor>::readLatest(T* data, size_t nMessages) {
+    size_t available = availableToRead();
+    if (available == 0) {
+        return 0;
+    }
+
+    // Handle Ring Buffer Overflow.
+    // If the writer has wrapped around and overwritten unread data,
+    // we clamp 'available' to the queue capacity and advance the read pointer.
+    const size_t capacity = getQuantumCount();
+    if (available > capacity) {
+        available = capacity;
+
+        // Calculate the start position relative to the write head
+        const size_t newReadPos =
+                mWritePtr->load(std::memory_order_acquire) - (available * getQuantumSize());
+        mReadPtr->store(newReadPos, std::memory_order_release);
+    }
+
+    MemTransaction tx;
+    if (!beginRead(available, &tx)) {
+        return 0;
+    }
+
+    // Determine Read Size and Offset.
+    // We only want the *latest* nMessages, so we might need to skip older ones
+    // that are currently available in the buffer.
+    size_t readCount = std::min(nMessages, available);
+    size_t skipCount = available - readCount;
+
+    if (!tx.copyFrom(data, skipCount, readCount)) {
+        return 0;
+    }
+
+    if (!commitRead(available)) {
+        return 0;
+    }
+
+    return readCount;
+}
+
+template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
+size_t MessageQueueBase<MQDescriptorType, T, flavor>::readLatest(T* data) {
+    return readLatest(data, 1);
 }
 
 template <template <typename, MQFlavor> typename MQDescriptorType, typename T, MQFlavor flavor>
