@@ -69,11 +69,13 @@ impl<T: Share> WriteCompletion<'_, T> {
     /// Obtain a pointer to the location at which the idx'th item should be
     /// stored.
     ///
+    /// The returned pointer is correctly aligned for type `T`.
+    ///
     /// The returned pointer is only valid while `self` has not been dropped and
     /// is invalidated by any call to `self.write`. The pointer should be used
-    /// with `std::ptr::write` or a DMA API to initialize the underlying storage
-    /// before calling `assume_written` to indicate how many elements were
-    /// written.
+    /// with `std::ptr::write_volatile` or a DMA API to initialize the
+    /// underlying storage before calling `assume_written` to indicate how many
+    /// elements were written.
     ///
     /// It is only permitted to access at most `contiguous_count(idx)` items
     /// via offsets from the returned address.
@@ -111,10 +113,13 @@ impl<T: Share> WriteCompletion<'_, T> {
     /// Write one item to `self`. Fails and returns the item if `self` is full.
     pub fn write(&mut self, data: T) -> Result<(), T> {
         if self.required_elements() > 0 {
-            // SAFETY: `self.ptr(self.n_written)` is known to be uninitialized.
+            // SAFETY: `self.ptr(self.n_written)` returns a pointer aligned for
+            // the type `T` into a shared-memory buffer that will live as long
+            // as the `ErasedMessageQueue` that this `WriteCompletion` borrows.
+            //
             // The dtor of data, if any, will not run because `data` is moved
             // out of here.
-            unsafe { self.ptr(self.n_written).write(data) };
+            unsafe { self.ptr(self.n_written).write_volatile(data) };
             self.n_written += 1;
             Ok(())
         } else {
@@ -319,6 +324,14 @@ unsafe fn slice_from_raw_parts_or_empty<'a, T>(data: *const T, len: usize) -> &'
     }
 }
 
+/// Obtain the address of the `idx`th element of the `MemTransaction`, which
+/// may fall into either of its contiguous regions.
+///
+/// This pointer will be aligned to the size of the type `T`, as given by
+/// `MessageQueue::<T>::type_size`, because the underlying `ErasedMessageQueue`
+/// is created with that size as its `quantum`. Because a type's size is always
+/// a multiple of its alignment, this means this pointer is correctly aligned
+/// for type `T`.
 #[inline(always)]
 fn ptr<T: Share>(txn: &MemTransaction, idx: usize) -> *mut T {
     let (base, region_idx) = if idx < txn.first.length {
@@ -363,10 +376,12 @@ pub struct ReadCompletion<'a, T: Share> {
 impl<T: Share> ReadCompletion<'_, T> {
     /// Obtain a pointer to the location at which the idx'th item is located.
     ///
+    /// The returned pointer is correctly aligned for type `T`.
+    ///
     /// The returned pointer is only valid while `self` has not been dropped and
     /// is invalidated by any call to `self.read`. The pointer should be used
-    /// with `std::ptr::read` or a DMA API before calling `assume_read` to
-    /// indicate how many elements were read.
+    /// with `std::ptr::read_volatile` or a DMA API before calling `assume_read`
+    /// to indicate how many elements were read.
     ///
     /// It is only permitted to access at most `contiguous_count(idx)` items
     /// via offsets from the returned address.
@@ -404,9 +419,10 @@ impl<T: Share> ReadCompletion<'_, T> {
     /// Read one item from the `self`. Fails and returns `()` if `self` is empty.
     pub fn read(&mut self) -> Option<T> {
         if self.unread_elements() > 0 {
-            // SAFETY: `self.ptr(self.n_read)`is known to be filled with a valid
-            // instance of type `T`.
-            let data = unsafe { self.ptr(self.n_read).read() };
+            // SAFETY: `self.ptr(self.n_read)` returns a pointer aligned for
+            // the type `T` into a shared-memory buffer that will live as long
+            // as the `ErasedMessageQueue` that this `ReadCompletion` borrows.
+            let data = unsafe { self.ptr(self.n_read).read_volatile() };
             self.n_read += 1;
             Some(data)
         } else {
