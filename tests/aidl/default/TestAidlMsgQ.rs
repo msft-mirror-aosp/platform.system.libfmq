@@ -16,7 +16,9 @@
 * limitations under the License.
 */
 
-use android_fmq_test::aidl::android::fmq::test::ITestAidlMsgQ::ITestAidlMsgQ;
+use android_fmq_test::aidl::android::fmq::test::{
+    EventFlagBits::EventFlagBits, ITestAidlMsgQ::ITestAidlMsgQ,
+};
 use android_fmq_test::binder::{self, Interface, Result as BinderResult};
 
 /// Struct implementing the ITestAidlMsgQ AIDL interface
@@ -32,6 +34,8 @@ use android_hardware_common_fmq::aidl::android::hardware::common::fmq::{
     UnsynchronizedWrite::UnsynchronizedWrite,
 };
 
+use std::sync::atomic::Ordering;
+
 impl ITestAidlMsgQ for MsgQTestService {
     /**
      * This method requests the service to set up a synchronous read/write
@@ -46,12 +50,12 @@ impl ITestAidlMsgQ for MsgQTestService {
         &self,
         mq_desc: &MQDescriptor<i32, SynchronizedReadWrite>,
     ) -> BinderResult<bool> {
-        *self.queue_sync.lock().unwrap() = Some(fmq::MessageQueue::from_desc(mq_desc, false));
-        /* TODO(b/339999649) in C++ we set the EventFlag word with bit FMQ_NOT_FULL: */
-        /*auto evFlagWordPtr = mFmqSynchronized->getEventFlagWord();
-        if (evFlagWordPtr != nullptr) {
-            std::atomic_init(evFlagWordPtr, static_cast<uint32_t>(EventFlagBits::FMQ_NOT_FULL));
-        }*/
+        let mq = fmq::MessageQueue::from_desc(mq_desc, true);
+        /* Set the EventFlag word with bit FMQ_NOT_FULL. */
+        if let Some(event_word) = mq.event_flag_word() {
+            event_word.store(EventFlagBits::FMQ_NOT_FULL.0 as u32, Ordering::Relaxed);
+        }
+        *self.queue_sync.lock().unwrap() = Some(mq);
 
         Ok(true)
     }
@@ -129,15 +133,49 @@ impl ITestAidlMsgQ for MsgQTestService {
      * @param count Number of messages to read.
      *
      */
-    fn requestBlockingRead(&self, _: i32) -> BinderResult<()> {
-        todo!("b/339999649")
+    fn requestBlockingRead(&self, count: i32) -> BinderResult<()> {
+        self.requestBlockingReadDefaultEventFlagBits(count)
     }
-    fn requestBlockingReadDefaultEventFlagBits(&self, _: i32) -> BinderResult<()> {
-        todo!("b/339999649")
+
+    /**
+     * This method requests the service to trigger a blocking read using
+     * default Event Flag notification bits defined by the MessageQueue class.
+     *
+     * @param count Number of messages to read.
+     *
+     */
+    fn requestBlockingReadDefaultEventFlagBits(&self, count: i32) -> BinderResult<()> {
+        let mut queue_guard = self.queue_sync.lock().unwrap();
+        let Some(ref mut mq) = *queue_guard else {
+            return Err(binder::Status::new_service_specific_error_str(107, Some("no fmq set up")));
+        };
+
+        let mut buf = vec![0; count as usize];
+        let result = mq.read_blocking(&mut buf[..], Some(std::time::Duration::from_secs(5)));
+
+        if !result {
+            return Err(binder::Status::new_service_specific_error_str(
+                5,
+                Some("blocking read failed"),
+            ));
+        }
+        Ok(())
     }
-    fn requestBlockingReadRepeat(&self, _: i32, _: i32) -> BinderResult<()> {
-        todo!("b/339999649")
+
+    /**
+     * This method requests the service to repeatedly trigger blocking reads.
+     *
+     * @param count Number of messages to read in a single blocking read.
+     * @param numIter Number of blocking reads to trigger.
+     *
+     */
+    fn requestBlockingReadRepeat(&self, count: i32, repeats: i32) -> BinderResult<()> {
+        for _ in 0..repeats {
+            self.requestBlockingRead(count)?;
+        }
+        Ok(())
     }
+
     fn requestReadFmqUnsync(&self, _: i32) -> BinderResult<bool> {
         // The Rust interface to FMQ does not support `UnsynchronizedWrite`.
         Ok(false)

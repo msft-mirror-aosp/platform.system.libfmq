@@ -26,6 +26,9 @@ use log::error;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use std::ptr::addr_of_mut;
+use std::ptr::NonNull;
+use std::sync::atomic::AtomicU32;
+use std::time::Duration;
 
 /// A trait indicating that a type is safe to pass through shared memory.
 ///
@@ -161,6 +164,9 @@ impl<T: Share> MessageQueue<T> {
     }
 
     /// Create a new MessageQueue with capacity for `elems` elements.
+    ///
+    /// If `event_word` is true, allocate an EventFlag word to use for
+    /// synchronization on the status of the queue.
     pub fn new(elems: usize, event_word: bool) -> Self {
         Self {
             // SAFETY: Calling bindgen'd constructor. The only argument that
@@ -302,6 +308,35 @@ impl<T: Share> MessageQueue<T> {
         // pointers and lengths pointing into the queue. The pointer to txn is
         // not stored.
         unsafe { self.inner.beginWrite(n, addr_of_mut!(txn)) }.then_some(txn)
+    }
+
+    /// Waiting for a zero duration is interpreted as waiting forever by the C++
+    /// readBlocking/writeBlocking calls. In Rust this kind of sentinel behavior is
+    /// a smell as the Option type is idiomatic, so bump 0ns timeouts to 1ns.
+    fn timeout_nanos(timeout: Option<Duration>) -> i64 {
+        let nanos = timeout.map(|t| t.as_nanos().max(1)).unwrap_or(0);
+        // Saturate to maximum i64 if nanos exceeds its range
+        nanos.try_into().unwrap_or(i64::MAX)
+    }
+
+    /// Write a slice of items into the `MessageQueue`, blocking until the
+    /// entire slice can be written. If a non-`None` `timeout` is passed, the
+    /// call will time out after this duration.
+    ///
+    /// The return value indicates whether the slice was written into the
+    /// MessageQueue. If false is returned, no elements were written.
+    pub fn write_blocking(&mut self, data: &[T], timeout: Option<Duration>) -> bool {
+        // SAFETY: we pass the mutable slice as raw pointer and length, and the
+        // pointer is known to be valid as it is derived from the slice
+        // directly. For types implementing `Share`, we know that it is OK
+        // to transfer the type over SHM in this manner.
+        unsafe {
+            self.inner.writeBlocking(
+                data.as_ptr() as *const _,
+                data.len(),
+                Self::timeout_nanos(timeout),
+            )
+        }
     }
 }
 
@@ -484,6 +519,56 @@ impl<T: Share> MessageQueue<T> {
         // not stored.
         unsafe { self.inner.beginRead(n, addr_of_mut!(txn)) }.then_some(txn)
     }
+
+    /// Read a slice of items from the `MessageQueue`, blocking until the entire
+    /// slice can be filled. If a non-`None` `timeout` is passed, the call will
+    /// time out after this duration.
+    ///
+    /// The return value indicates whether the slice was filled with elements
+    /// from the MessageQueue. If false is returned, the slice is not modified.
+    pub fn read_blocking(&mut self, data: &mut [T], timeout: Option<Duration>) -> bool {
+        // SAFETY: we pass the mutable slice as raw pointer and length, and the
+        // pointer is known to be valid as it is derived from the slice
+        // directly. For types implementing `Share`, we know that it is OK to
+        // obtain an instance of the type by copying from SHM in this manner.
+        unsafe {
+            self.inner.readBlocking(
+                data.as_mut_ptr() as *mut _,
+                data.len(),
+                Self::timeout_nanos(timeout),
+            )
+        }
+    }
+
+    /// Obtain a reference to the `MessageQueue`'s event flag word if it has one.
+    ///
+    /// Producers and consumers may synchronize over the status of the
+    /// `MessageQueue`'s contents using this atomic, but the specific protocol
+    /// for doing so is not specified and must be coordinated by developers of
+    /// components that intend to use the `MessageQueue` for synchronization.
+    pub fn event_flag_word(&self) -> Option<&AtomicU32> {
+        // SAFETY: the FFI call only depends on the validity of `self`.
+        // Casting a `*mut u32` to `*mut AtomicU32` is valid. The returned
+        // pointer to the EventFlag word is either NULL or a pointer to an
+        // allocation that lasts as long as the underlying FMQ does.
+        unsafe {
+            let event_flag_ptr = self.inner.getEventFlagWord();
+            let atomic_ptr = event_flag_ptr as *mut AtomicU32;
+            NonNull::new(atomic_ptr).map(|nn| nn.as_ref())
+        }
+    }
+}
+
+#[test]
+fn test_timeout_nanos() {
+    let timeout_nanos = MessageQueue::<()>::timeout_nanos;
+    assert_eq!(timeout_nanos(None), 0);
+    assert_eq!(timeout_nanos(Some(Duration::from_nanos(0))), 1);
+    assert_eq!(timeout_nanos(Some(Duration::from_nanos(1))), 1);
+    assert_eq!(timeout_nanos(Some(Duration::from_nanos(5000))), 5000);
+    assert_eq!(timeout_nanos(Some(Duration::from_nanos(i64::MAX as u64))), i64::MAX);
+    assert_eq!(timeout_nanos(Some(Duration::from_nanos(i64::MAX as u64 + 1))), i64::MAX);
+    assert_eq!(timeout_nanos(Some(Duration::from_nanos(u64::MAX))), i64::MAX);
 }
 
 #[cfg(test)]

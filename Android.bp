@@ -81,10 +81,12 @@ cc_library_headers {
 
 cc_library {
     name: "libfmq_erased",
+    visibility: ["//visibility:private"],
     shared_libs: [
         "libbase",
         "liblog",
         "libcutils",
+        "libutils",
         "libfmq",
         "android.hardware.common.fmq-V1-ndk",
     ],
@@ -158,6 +160,9 @@ rust_bindgen {
         "--allowlist-function=.*beginRead",
         "--allowlist-function=.*commitWrite",
         "--allowlist-function=.*commitRead",
+        "--allowlist-function=.*writeBlocking",
+        "--allowlist-function=.*readBlocking",
+        "--allowlist-function=.*getEventFlagWord",
         "--allowlist-function=getAddress",
         "--allowlist-function=getLength.*",
         "--allowlist-function=get(First|Second)Region",
@@ -224,6 +229,7 @@ rust_library {
 
 rust_test {
     name: "libfmq_rust_unit_test",
+    test_suites: ["general-tests"],
     defaults: ["libfmq_rust_defaults"],
     test_options: {
         unit_test: true,
