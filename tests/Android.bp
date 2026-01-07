@@ -50,6 +50,7 @@ rust_test {
         "libbinder_rs",
         "libfmq_rust",
         "liblibc",
+        "libnix",
     ],
     shared_libs: [
         "libutils",

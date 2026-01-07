@@ -17,6 +17,7 @@
 use android_fmq_test::aidl::android::fmq::test::ITestAidlMsgQ::ITestAidlMsgQ;
 use binder::Strong;
 use fmq::MessageQueue;
+use nix::unistd::{sysconf, SysconfVar};
 
 fn wait_get_test_service() -> Result<Strong<dyn ITestAidlMsgQ>, String> {
     const SERVICE_IDENTIFIER: &str = "android.fmq.test.ITestAidlMsgQ/default";
@@ -28,8 +29,11 @@ fn wait_get_test_service() -> Result<Strong<dyn ITestAidlMsgQ>, String> {
 fn setup_test_service() -> (MessageQueue<i32>, Strong<dyn ITestAidlMsgQ>) {
     let service = wait_get_test_service().expect("failed to obtain test service");
 
-    /* SAFETY: `sysconf` simply returns an integer. */
-    let page_size: usize = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.try_into().unwrap();
+    let page_size: usize = sysconf(SysconfVar::PAGE_SIZE)
+        .expect("sysconf(PAGE_SIZE) failed")
+        .unwrap()
+        .try_into()
+        .expect("PAGE_SIZE out of bounds for usize");
     let num_elements_in_sync_queue: usize = (page_size - 16) / std::mem::size_of::<i32>();
 
     /* Create a queue on the client side. */
