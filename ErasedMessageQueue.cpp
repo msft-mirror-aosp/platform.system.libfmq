@@ -98,6 +98,10 @@ bool ErasedMessageQueue::commitWrite(size_t nMessages) {
     return inner->commitWrite(nMessages);
 }
 
+bool ErasedMessageQueue::writeBlocking(const void* data, size_t count, int64_t timeOutNanos) {
+    return inner->writeBlocking(static_cast<const MQErased*>(data), count, timeOutNanos);
+}
+
 bool ErasedMessageQueue::beginRead(size_t nMessages, MemTransaction* memTx) const {
     AidlMessageQueue<MQErased, SynchronizedReadWrite>::MemTransaction memTxInternal;
     auto result = inner->beginRead(nMessages, &memTxInternal);
@@ -108,6 +112,16 @@ bool ErasedMessageQueue::beginRead(size_t nMessages, MemTransaction* memTx) cons
 
 bool ErasedMessageQueue::commitRead(size_t nMessages) {
     return inner->commitRead(nMessages);
+}
+
+bool ErasedMessageQueue::readBlocking(void* data, size_t count, int64_t timeOutNanos) {
+    return inner->readBlocking(static_cast<MQErased*>(data), count, timeOutNanos);
+}
+
+uint32_t* ErasedMessageQueue::getEventFlagWord() const {
+    // Rust code only accesses this via atomic operations, but bindgen doesn't know `std::atomic`,
+    // so we expose the flag word as a regular uint32_t*, casting back to atomic on the Rust side.
+    return reinterpret_cast<uint32_t*>(inner->getEventFlagWord());
 }
 
 ErasedMessageQueueDesc* ErasedMessageQueue::dupeDesc() const {

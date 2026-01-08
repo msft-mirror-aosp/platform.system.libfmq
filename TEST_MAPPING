@@ -5,6 +5,9 @@
     },
     {
       "name": "fmq_test"
+    },
+    {
+      "name": "libfmq_rust_unit_test"
     }
   ],
   "postsubmit": [

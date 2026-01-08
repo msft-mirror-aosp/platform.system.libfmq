@@ -87,8 +87,6 @@ if __name__ == '__main__':
                 "SynchronizedReadWriteClient/1.*",
                 "SynchronizedReadWriteClient/3.*",
                 "SynchronizedReadWriteClient/4.*",
-                # Skip blocking tests until the Rust FMQ interface supports them: TODO(b/339999649)
-                "-*Blocking*",
             ])
             # Enable subset of tests if testing C++ client against the rust server
             gtest_filter = rust_tests if "rust" in server and not "rust" in client else None
