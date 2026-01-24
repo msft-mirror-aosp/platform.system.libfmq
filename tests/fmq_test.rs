@@ -130,9 +130,13 @@ fn write_by_pointer_no_wraparound_test() -> bool {
     match mq.read_many(data_to_write.len()) {
         Some(mut reader) => {
             for _ in 0..data_to_write.len() {
-                match reader.read() {
-                    Some(val) => read_data.push(val),
-                    None => {
+                match reader.try_read() {
+                    Ok(Some(val)) => read_data.push(val),
+                    Err(_) => {
+                        eprintln!("read invalid value for type");
+                        return false;
+                    }
+                    Ok(None) => {
                         eprintln!("failed to read expected value");
                         return false;
                     }
@@ -188,9 +192,13 @@ fn write_by_pointer_wraparound_test() -> bool {
     match mq.read_many(TEST_SIZE) {
         Some(mut reader) => {
             for _ in 0..TEST_SIZE {
-                match reader.read() {
-                    Some(val) => read_data.push(val),
-                    None => {
+                match reader.try_read() {
+                    Ok(Some(val)) => read_data.push(val),
+                    Err(_) => {
+                        eprintln!("read invalid value for type");
+                        return false;
+                    }
+                    Ok(None) => {
                         eprintln!("failed to read expected value");
                         return false;
                     }

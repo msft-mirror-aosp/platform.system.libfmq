@@ -51,6 +51,7 @@ rust_test {
         "libfmq_rust",
         "liblibc",
         "libnix",
+        "libzerocopy",
     ],
     shared_libs: [
         "libutils",

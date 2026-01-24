@@ -55,6 +55,65 @@ interface ITestAidlMsgQ {
         out MQDescriptor<int, UnsynchronizedWrite> mqDesc);
 
     /**
+     * Various AIDL payload types to test FMQ transfer of AIDL types.
+     */
+    enum EnumPayload {
+        VARIANT1,
+        VARIANT2,
+        VARIANT3,
+    }
+
+    @RustDerive(Copy=true, Clone=true, Eq=true, PartialEq=true)
+    @FixedSize
+    parcelable StructPayload {
+        char charField;
+        int intField;
+        long longField;
+    }
+
+    @RustDerive(Copy=true, Clone=true, Eq=true, PartialEq=true)
+    @FixedSize
+    parcelable OtherStructPayload {
+        char[23] charsField;
+        boolean boolField;
+    }
+
+    @RustDerive(Copy=true, Clone=true, Eq=true, PartialEq=true)
+    @FixedSize
+    parcelable SmallStructPayload {
+        boolean boolField;
+    }
+
+    @RustDerive(Copy=true, Clone=true, Eq=true, PartialEq=true)
+    @FixedSize
+    union UnionPayload {
+        StructPayload structVariant;
+        OtherStructPayload otherStructVariant;
+        SmallStructPayload smallStructVariant;
+        boolean boolVariant;
+        int intVariant;
+        long[10] longsVariant;
+    }
+
+    /**
+     * Obtain MQDescriptors for queues transferring various AIDL types with an
+     * synchronized FMQ. See 'getFmqUnsyncWrite'.
+     */
+    boolean configureFmqAidlTypesSyncReadWrite(
+        in @nullable MQDescriptor<StructPayload, SynchronizedReadWrite> mqDescStruct,
+        in @nullable MQDescriptor<UnionPayload, SynchronizedReadWrite> mqDescUnion,
+        in @nullable MQDescriptor<EnumPayload, SynchronizedReadWrite> mqDescEnum);
+
+    /**
+     * Obtain MQDescriptors for queues transferring various AIDL types with an
+     * unsynchronized FMQ. See 'getFmqUnsyncWrite'.
+     */
+    boolean getFmqAidlTypesUnsyncWrite(in boolean configureFmq, in boolean userFd,
+        out @nullable MQDescriptor<StructPayload, UnsynchronizedWrite> mqDescStruct,
+        out @nullable MQDescriptor<UnionPayload, UnsynchronizedWrite> mqDescUnion,
+        out @nullable MQDescriptor<EnumPayload, UnsynchronizedWrite> mqDescEnum);
+
+    /**
      * This method requests the service to trigger a blocking read.
      *
      * @param count Number of messages to read.

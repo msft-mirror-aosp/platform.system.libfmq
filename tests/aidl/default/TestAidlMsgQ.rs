@@ -16,15 +16,24 @@
 * limitations under the License.
 */
 
+use std::{fmt::Debug, sync::Mutex};
+
 use android_fmq_test::aidl::android::fmq::test::{
-    EventFlagBits::EventFlagBits, ITestAidlMsgQ::ITestAidlMsgQ,
+    EventFlagBits::EventFlagBits,
+    ITestAidlMsgQ::{
+        EnumPayload::EnumPayload, ITestAidlMsgQ, StructPayload::StructPayload,
+        UnionPayload::UnionPayload,
+    },
 };
 use android_fmq_test::binder::{self, Interface, Result as BinderResult};
 
 /// Struct implementing the ITestAidlMsgQ AIDL interface
 #[derive(Default)]
 pub struct MsgQTestService {
-    queue_sync: std::sync::Mutex<Option<fmq::MessageQueue<i32>>>,
+    queue_sync_struct: Mutex<Option<fmq::MessageQueue<StructPayload>>>,
+    queue_sync_union: Mutex<Option<fmq::MessageQueue<UnionPayload>>>,
+    queue_sync_enum: Mutex<Option<fmq::MessageQueue<EnumPayload>>>,
+    queue_sync: Mutex<Option<fmq::MessageQueue<i32>>>,
 }
 
 impl Interface for MsgQTestService {}
@@ -35,6 +44,20 @@ use android_hardware_common_fmq::aidl::android::hardware::common::fmq::{
 };
 
 use std::sync::atomic::Ordering;
+
+/// Create a `MessageQueue` from the given descriptor, configuring an event flag
+/// word and initializing it to `EventFlagBits::FMQ_NOT_FULL`.
+fn mq_with_ev_flag_word<T>(desc: &MQDescriptor<T, SynchronizedReadWrite>) -> fmq::MessageQueue<T>
+where
+    T: zerocopy::TryFromBytes,
+{
+    let mq = fmq::MessageQueue::from_desc(desc, true);
+    /* Set the EventFlag word with bit FMQ_NOT_FULL. */
+    if let Some(event_word) = mq.event_flag_word() {
+        event_word.store(EventFlagBits::FMQ_NOT_FULL.0 as u32, Ordering::Relaxed);
+    }
+    mq
+}
 
 impl ITestAidlMsgQ for MsgQTestService {
     /**
@@ -50,14 +73,54 @@ impl ITestAidlMsgQ for MsgQTestService {
         &self,
         mq_desc: &MQDescriptor<i32, SynchronizedReadWrite>,
     ) -> BinderResult<bool> {
-        let mq = fmq::MessageQueue::from_desc(mq_desc, true);
-        /* Set the EventFlag word with bit FMQ_NOT_FULL. */
-        if let Some(event_word) = mq.event_flag_word() {
-            event_word.store(EventFlagBits::FMQ_NOT_FULL.0 as u32, Ordering::Relaxed);
-        }
-        *self.queue_sync.lock().unwrap() = Some(mq);
+        *self.queue_sync_struct.lock().unwrap() = None;
+        *self.queue_sync_union.lock().unwrap() = None;
+        *self.queue_sync_enum.lock().unwrap() = None;
+        *self.queue_sync.lock().unwrap() = Some(mq_with_ev_flag_word(mq_desc));
 
         Ok(true)
+    }
+
+    /**
+     * This method requests the service to set up a synchronous read/write
+     * wait-free FMQ using the given input descriptor with client as reader.
+     *
+     * Only exactly one of the arguments should be non-NULL. The server will use
+     * the non-NULL descriptor to set up a FMQ object at its end, which can then
+     * be directed to read or write with the various request* methods.
+     *
+     * @return True if the setup is successful.
+     */
+    fn configureFmqAidlTypesSyncReadWrite(
+        &self,
+        mq_desc_struct: Option<&MQDescriptor<StructPayload, SynchronizedReadWrite>>,
+        mq_desc_union: Option<&MQDescriptor<UnionPayload, SynchronizedReadWrite>>,
+        mq_desc_enum: Option<&MQDescriptor<EnumPayload, SynchronizedReadWrite>>,
+    ) -> BinderResult<bool> {
+        assert!(
+            [mq_desc_struct.is_some(), mq_desc_union.is_some(), mq_desc_enum.is_some(),]
+                .into_iter()
+                .filter(|b| *b)
+                .count()
+                == 1,
+            "exactly one descriptor must be non-NULL"
+        );
+        *self.queue_sync_struct.lock().unwrap() = mq_desc_struct.map(mq_with_ev_flag_word);
+        *self.queue_sync_union.lock().unwrap() = mq_desc_union.map(mq_with_ev_flag_word);
+        *self.queue_sync_enum.lock().unwrap() = mq_desc_enum.map(mq_with_ev_flag_word);
+        *self.queue_sync.lock().unwrap() = None;
+        Ok(true)
+    }
+    fn getFmqAidlTypesUnsyncWrite(
+        &self,
+        _: bool,
+        _: bool,
+        _: &mut Option<MQDescriptor<StructPayload, UnsynchronizedWrite>>,
+        _: &mut Option<MQDescriptor<UnionPayload, UnsynchronizedWrite>>,
+        _: &mut Option<MQDescriptor<EnumPayload, UnsynchronizedWrite>>,
+    ) -> BinderResult<bool> {
+        // The Rust interface to FMQ does not support `UnsynchronizedWrite`.
+        Ok(false)
     }
 
     /**
@@ -69,23 +132,41 @@ impl ITestAidlMsgQ for MsgQTestService {
      * @return True if the read operation was successful.
      */
     fn requestReadFmqSync(&self, count: i32) -> BinderResult<bool> {
-        let mut queue_guard = self.queue_sync.lock().unwrap();
-        let Some(ref mut mq) = *queue_guard else {
-            return Err(binder::Status::new_service_specific_error_str(107, Some("no fmq set up")));
-        };
-        let rc = mq.read_many(count.try_into().unwrap());
-        match rc {
-            Some(mut rc) => {
-                for _ in 0..count {
-                    rc.read().unwrap();
+        fn read_sync<T: zerocopy::TryFromBytes + Debug>(
+            mutex_mq: &Mutex<Option<fmq::MessageQueue<T>>>,
+            count: i32,
+        ) -> Option<bool> {
+            let mut queue_guard = mutex_mq.lock().unwrap();
+            let mq = queue_guard.as_mut()?;
+            let rc = mq.read_many(count.try_into().unwrap());
+            match rc {
+                Some(mut rc) => {
+                    for _ in 0..count {
+                        rc.try_read().unwrap().unwrap();
+                    }
+                    Some(true)
                 }
-                Ok(true)
-            }
-            None => {
-                eprintln!("failed to read_many({count})");
-                Ok(false)
+                None => {
+                    eprintln!("failed to read_many({count})");
+                    Some(false)
+                }
             }
         }
+
+        if let Some(ret) = read_sync(&self.queue_sync_struct, count) {
+            return Ok(ret);
+        }
+        if let Some(ret) = read_sync(&self.queue_sync_union, count) {
+            return Ok(ret);
+        }
+        if let Some(ret) = read_sync(&self.queue_sync_enum, count) {
+            return Ok(ret);
+        }
+        if let Some(ret) = read_sync(&self.queue_sync, count) {
+            return Ok(ret);
+        }
+
+        Err(binder::Status::new_service_specific_error_str(107, Some("no fmq set up")))
     }
 
     /**
@@ -97,24 +178,43 @@ impl ITestAidlMsgQ for MsgQTestService {
      * @return True if the write operation was successful.
      */
     fn requestWriteFmqSync(&self, count: i32) -> BinderResult<bool> {
-        let mut queue_guard = self.queue_sync.lock().unwrap();
-        let Some(ref mut mq) = *queue_guard else {
-            return Err(binder::Status::new_service_specific_error_str(107, Some("no fmq set up")));
-        };
-        let wc = mq.write_many(count.try_into().unwrap());
-        match wc {
-            Some(mut wc) => {
-                for i in 0..count {
-                    wc.write(i).unwrap();
+        fn write_sync<T: binder::WriteTo + zerocopy::Immutable + Debug, F: Fn(i32) -> T>(
+            mutex_mq: &Mutex<Option<fmq::MessageQueue<T>>>,
+            count: i32,
+            gen_val: F,
+        ) -> Option<bool> {
+            let mut queue_guard = mutex_mq.lock().unwrap();
+            let mq = queue_guard.as_mut()?;
+            let wc = mq.write_many(count.try_into().unwrap());
+            match wc {
+                Some(mut wc) => {
+                    for i in 0..count {
+                        wc.write(gen_val(i)).unwrap();
+                    }
+                    drop(wc);
+                    Some(true)
                 }
-                drop(wc);
-                Ok(true)
-            }
-            None => {
-                eprintln!("failed to write_many({count})");
-                Ok(false)
+                None => {
+                    eprintln!("failed to write_many({count})");
+                    Some(false)
+                }
             }
         }
+
+        if let Some(ret) = write_sync(&self.queue_sync_struct, count, |_: i32| Default::default()) {
+            return Ok(ret);
+        }
+        if let Some(ret) = write_sync(&self.queue_sync_union, count, |_: i32| Default::default()) {
+            return Ok(ret);
+        }
+        if let Some(ret) = write_sync(&self.queue_sync_enum, count, |_: i32| Default::default()) {
+            return Ok(ret);
+        }
+        if let Some(ret) = write_sync(&self.queue_sync, count, move |i: i32| i) {
+            return Ok(ret);
+        }
+
+        Err(binder::Status::new_service_specific_error_str(107, Some("no fmq set up")))
     }
 
     fn getFmqUnsyncWrite(
